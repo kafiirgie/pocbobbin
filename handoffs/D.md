@@ -11,11 +11,11 @@
 
 | Deliverable | File | Status | Notes |
 |---|---|---|---|
-| **D1: Decision Logic** | `app/decisions.py` | **Done & Wired** | `validate_and_save`, `lookup`, `approve_decision`, directly queried by `app.cli.pipeline` for `prior_decisions`. |
-| **D2: Decision Ledger** | `behavior_decisions/` | **Done & Seeded** | Contains Scenario 2 approved decision (`951cc25e49ee.json`) generated from the real Scenario 2 run; automatically cited on subsequent PRs touching `apply_discount`. |
-| **D3: Bob Custom Mode** | `.bob/custom_modes.yaml` | **Done & Wired to B** | `/behavior-review` mode configured with 7-step MOC loop, paired runner execution (`--run`), prior decision inspection, and Lane B probe JSON format for `needs_bob_action`. |
-| **D4: GitHub Action** | `.github/workflows/behavior-review.yml` | **Done & Wired to B** | Runs with `--run` (reusing Lane B committed probes and frozen tests), uploads `report.json`, and comments full evidence (tests, comparisons, callers outside diff, prior decisions). |
-| **Tests** | `tests/test_decisions.py` | **Done** | 10 unit tests + snapshot CLI tests covering decisions, superseding, and lookup. |
+| **D1: Decision Logic** | [`app/decisions.py`](../app/decisions.py) | **Done & Wired** | `validate_and_save`, `lookup`, `approve_decision`, directly queried by `app.cli.pipeline` for `prior_decisions`. |
+| **D2: Decision Ledger** | [`behavior_decisions/`](../behavior_decisions/) | **Done & Seeded** | Contains Scenario 2 approved decision (`951cc25e49ee.json`) generated from the real Scenario 2 run; automatically cited on subsequent PRs touching `apply_discount`. |
+| **D3: Bob Custom Mode** | [`.bob/custom_modes.yaml`](../.bob/custom_modes.yaml) | **Done & Wired to B** | `/behavior-review` mode configured with 7-step MOC loop, paired runner execution (`--run`), prior decision inspection, and Lane B probe JSON format for `needs_bob_action`. |
+| **D4: GitHub Action** | [`.github/workflows/behavior-review.yml`](../.github/workflows/behavior-review.yml) | **Done & Wired to B** | Runs with `--run` (reusing Lane B committed probes and frozen tests), uploads `report.json`, and comments full evidence (tests, comparisons, callers outside diff, prior decisions). |
+| **Tests** | [`tests/test_decisions.py`](../tests/test_decisions.py) | **Done** | 10 unit tests + snapshot CLI tests covering decisions, superseding, and lookup. |
 
 ---
 
