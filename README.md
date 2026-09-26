@@ -157,10 +157,11 @@ each detected adapter and the evidence is merged. Python remains the fallback on
 language evidence is detectable. Explicit `behavior.json` always wins and is recommended when a
 repository has a custom test/probe toolchain.
 
-Install the optional Tree-sitter dependencies:
+Tree-sitter is installed with the package because automatic detection may select a non-Python
+adapter. For development, install the test tools as well:
 
 ```bash
-pip install -e ".[dev,multilang]"
+pip install -e ".[dev]"
 ```
 
 The adapter registry currently accepts Python, TypeScript, JavaScript, Java, C#, Go, C++, C,
