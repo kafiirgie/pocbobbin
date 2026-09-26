@@ -1,4 +1,4 @@
-"""Tree-sitter impact adapter for TypeScript and JavaScript.
+"""Tree-sitter impact adapter for the configured non-Python languages.
 
 This adapter intentionally resolves only direct, statically visible calls.
 Anything that could reach a changed symbol but cannot be resolved is emitted as
@@ -34,9 +34,60 @@ FUNCTION_TYPES = {
     "generator_function_declaration",
     "method_definition",
     "abstract_method_signature",
+    "method_declaration",
+    "constructor_declaration",
+    "function_definition",
+    "function_item",
+    "function_declaration",
+    "local_function_statement",
+    "function_item",
+    "method",
+    "singleton_method",
 }
-CLASS_TYPES = {"class_declaration", "abstract_class_declaration"}
-VARIABLE_TYPES = {"lexical_declaration", "variable_declaration"}
+CLASS_TYPES = {
+    "class_declaration",
+    "abstract_class_declaration",
+    "interface_declaration",
+    "enum_declaration",
+    "struct_declaration",
+    "record_declaration",
+    "class_specifier",
+    "struct_specifier",
+    "union_specifier",
+    "impl_item",
+    "trait_item",
+    "class_definition",
+    "class",
+    "module",
+}
+VARIABLE_TYPES = {
+    "lexical_declaration",
+    "variable_declaration",
+    "short_var_declaration",
+    "var_declaration",
+    "const_declaration",
+}
+IMPORT_TYPES = {
+    "import_statement",
+    "import_declaration",
+    "using_directive",
+    "using_declaration",
+    "preproc_include",
+    "use_declaration",
+    "namespace_use_declaration",
+}
+CALL_TYPES = {
+    "call_expression",
+    "new_expression",
+    "await_expression",
+    "method_invocation",
+    "invocation_expression",
+    "function_call_expression",
+    "member_call_expression",
+    "call",
+    "command",
+    "method_call",
+}
 
 
 @dataclass(frozen=True)
@@ -89,16 +140,43 @@ def _line(node) -> int:
 def _name(node) -> str:
     named = _field(node, "name")
     if named is not None:
-        return _text(named).strip()
+        value = _text(named).strip()
+        if value:
+            return value
+    declarator = _field(node, "declarator")
+    if declarator is not None:
+        value = _declarator_name(declarator)
+        if value:
+            return value
     for child in node.named_children:
-        if child.type in {"identifier", "property_identifier", "type_identifier"}:
+        if child.type in {"identifier", "property_identifier", "type_identifier", "name", "simple_identifier"}:
             return _text(child).strip()
+    if node.type in {"create_function", "function_signature", "method_signature"}:
+        for child in node.named_children:
+            if child.type in {"object_reference", "simple_identifier", "identifier"}:
+                value = _text(child).strip()
+                if value:
+                    return value
+    return ""
+
+
+def _declarator_name(node) -> str:
+    """Find the callable name inside C/C++ declarator nesting."""
+
+    if node.type in {"identifier", "field_identifier", "property_identifier", "type_identifier", "name"}:
+        return _text(node).strip()
+    named = _field(node, "declarator") or _field(node, "name")
+    if named is not None and (value := _declarator_name(named)):
+        return value
+    for child in node.named_children:
+        if value := _declarator_name(child):
+            return value
     return ""
 
 
 def _signature(node) -> str:
     parts = []
-    for field in ("type_parameters", "parameters", "return_type"):
+    for field in ("type_parameters", "parameters", "method_parameters", "return_type", "result", "declarator"):
         value = _field(node, field)
         if value is not None:
             parts.append(_text(value).strip())
@@ -145,16 +223,123 @@ def _parse_imports(text: str) -> list[tuple[str, str, bool]]:
     return result
 
 
-def _collect(module: Module, root) -> None:
+def _parse_language_imports(text: str, language: str) -> list[tuple[str, str, str, bool]]:
+    """Return ``(local, imported, source, namespace)`` for common imports.
+
+    Resolution is deliberately conservative. A syntactically visible import
+    is not treated as resolved until it maps to a module in this checkout.
+    """
+
+    stripped = text.strip()
+    if language in {"typescript", "javascript"}:
+        source = _source_spec(text)
+        return [(local, imported, source, namespace) for local, imported, namespace in _parse_imports(text) if source]
+    if language == "java":
+        match = re.search(r"\bimport\s+(?P<static>static\s+)?(?P<qualified>[\w.]+)\s*;", text)
+        if not match:
+            return []
+        qualified = match.group("qualified")
+        parts = qualified.split(".")
+        local = parts[-1]
+        if match.group("static"):
+            source = ".".join(parts[:-1]) if len(parts) > 1 else qualified
+            return [(local, local, source, False)]
+        return [(local, local, qualified, True)]
+    if language == "csharp":
+        match = re.search(r"\busing\s+(?:[\w]+\s*=\s*)?([\w.]+)\s*;", text)
+        if not match:
+            return []
+        source = match.group(1)
+        local = source.rsplit(".", 1)[-1]
+        return [(local, "*", source, True)]
+    if language == "go":
+        result = []
+        for match in re.finditer(r'(?:(?P<alias>[\w_.]+)\s+)?"(?P<source>[^"\n]+)"', text):
+            source = match.group("source")
+            alias = match.group("alias")
+            local = None if alias in {None, "import"} else alias
+            local = local or source.rstrip("/").rsplit("/", 1)[-1]
+            if local != ".":
+                result.append((local, "*", source, True))
+        return result
+    if language in {"cpp", "c"}:
+        match = re.search(r"#\s*include\s*[<\"]([^>\"]+)[>\"]", text)
+        if not match:
+            return []
+        source = match.group(1)
+        local = PurePosixPath(source).stem
+        return [(local, "*", source, True)]
+    if language == "rust":
+        match = re.search(r"\buse\s+([^;]+);", text)
+        if not match:
+            return []
+        clause = match.group(1).strip()
+        if "::{" in clause and clause.endswith("}"):
+            prefix, names = clause.split("::{", 1)
+            for name in names[:-1].split(","):
+                local = name.strip().split(" as ")[-1].strip()
+                if local:
+                    return [(local, local, prefix, False)]
+        parts = clause.split("::")
+        local = parts[-1].split(" as ")[-1].strip()
+        source = "::".join(parts[:-1]) if len(parts) > 1 else clause
+        return [(local, local, source, False)]
+    if language == "php":
+        match = re.search(r"\buse\s+([A-Za-z_\\][\w\\]*)\s*;", text)
+        if not match:
+            return []
+        source = match.group(1).replace("\\", "/")
+        local = source.rsplit("/", 1)[-1]
+        return [(local, local, source, True)]
+    if stripped.startswith("import"):
+        source = _source_spec(text)
+        return [(source.rsplit("/", 1)[-1], "*", source, True)] if source else []
+    return []
+
+
+def _call_callee(node) -> str:
+    function = _field(node, "function") or _field(node, "constructor")
+    name = _field(node, "name") or _field(node, "method")
+    receiver = _field(node, "object") or _field(node, "receiver")
+    if function is not None:
+        return _text(function).strip()
+    if name is not None:
+        member = _text(name).strip()
+        if receiver is not None:
+            return f"{_text(receiver).strip()}.{member}"
+        return member
+    if node.named_children:
+        first = node.named_children[0]
+        if first.type in {"identifier", "simple_identifier", "word", "command_name", "name"}:
+            return _text(first).strip()
+    return ""
+
+
+def _collect(module: Module, root, language: str) -> None:
     """Collect definitions, imports, and direct calls from a syntax tree."""
 
     def visit(node, current: str | None = None, class_prefix: str | None = None, inside_function: bool = False) -> None:
         node_type = node.type
-        if node_type == "import_statement":
-            source = _source_spec(_text(node))
-            if source:
-                for local, imported, namespace in _parse_imports(_text(node)):
-                    module.imports.append(ImportSpec(local, imported, source, namespace))
+        if language == "dart" and node_type in {"program", "class_body"}:
+            children = list(node.named_children)
+            index = 0
+            while index < len(children):
+                child = children[index]
+                if child.type in {"function_signature", "method_signature"} and index + 1 < len(children) and children[index + 1].type == "function_body":
+                    name = _name(child)
+                    if name:
+                        symbol = f"{class_prefix}.{name}" if class_prefix else name
+                        body = children[index + 1]
+                        module.symbols[symbol] = SymbolDef(_line(child), _signature(child), _text(body).strip())
+                        visit(body, symbol, class_prefix, True)
+                    index += 2
+                    continue
+                visit(child, current, class_prefix, inside_function)
+                index += 1
+            return
+        if node_type in IMPORT_TYPES or node_type in {"preproc_def", "include_expression"}:
+            for local, imported, source, namespace in _parse_language_imports(_text(node), language):
+                module.imports.append(ImportSpec(local, imported, source, namespace))
             return
 
         if node_type == "export_statement":
@@ -173,9 +358,15 @@ def _collect(module: Module, root) -> None:
             if name:
                 symbol = f"{class_prefix}.{name}" if class_prefix else name
                 module.symbols[symbol] = SymbolDef(_line(node), _signature(node), _body(node))
-                body = _field(node, "body")
+                body = _field(node, "body") or _field(node, "declaration_list") or _field(node, "class_body")
                 if body is not None:
-                    for child in body.named_children:
+                    if language == "dart":
+                        visit(body, current, symbol, inside_function)
+                    else:
+                        for child in body.named_children:
+                            visit(child, current, symbol, inside_function)
+                else:
+                    for child in node.named_children:
                         visit(child, current, symbol, inside_function)
                 return
 
@@ -187,21 +378,28 @@ def _collect(module: Module, root) -> None:
                 body = _field(node, "body")
                 if body is not None:
                     visit(body, symbol, class_prefix, True)
+                else:
+                    for child in node.named_children:
+                        visit(child, symbol, class_prefix, True)
                 return
 
         if node_type in VARIABLE_TYPES and not inside_function:
             for child in node.named_children:
-                if child.type != "variable_declarator":
+                if child.type not in {"variable_declarator", "short_var_declaration", "var_spec", "const_spec"}:
                     continue
                 name = _name(child)
                 if name:
                     symbol = f"{class_prefix}.{name}" if class_prefix else name
                     module.symbols[symbol] = SymbolDef(_line(child), "", _text(_field(child, "value")).strip())
 
-        if node_type in {"call_expression", "new_expression", "await_expression"}:
-            callee = _field(node, "function") or _field(node, "constructor")
-            if callee is not None:
-                module.calls.append(CallRef(current or MODULE, _text(callee).strip(), _line(node)))
+        if node_type in CALL_TYPES:
+            callee = _call_callee(node)
+            if callee:
+                module.calls.append(CallRef(current or MODULE, callee, _line(node)))
+        if language == "dart" and node_type == "return_statement":
+            children = list(node.named_children)
+            if len(children) >= 2 and children[0].type in {"identifier", "simple_identifier"} and children[1].type == "selector":
+                module.calls.append(CallRef(current or MODULE, _text(children[0]).strip(), _line(node)))
 
         for child in node.named_children:
             visit(child, current, class_prefix, inside_function)
@@ -236,12 +434,14 @@ def _load_codebase(root: Path, config: BehaviorConfig) -> dict[str, Module]:
             language_name = config.language
             if path.suffix == ".tsx" or path.suffix == ".jsx":
                 language_name = "tsx"
+            if language_name == "csharp":
+                language_name = "csharp"
             parser = Parser(get_language(language_name))
             tree = parser.parse(module.text.encode("utf-8"))
             if tree.root_node.has_error:
                 module.error = "syntax error"
             else:
-                _collect(module, tree.root_node)
+                _collect(module, tree.root_node, config.language)
         except UnicodeDecodeError as exc:
             module.error = f"could not decode source: {exc}"
         except ImportError as exc:
@@ -250,20 +450,56 @@ def _load_codebase(root: Path, config: BehaviorConfig) -> dict[str, Module]:
     return modules
 
 
+def _suffix_match(path: str, candidates: list[str], modules: dict[str, Module]) -> str | None:
+    for candidate in candidates:
+        if candidate in modules:
+            return candidate
+    matches = [path for path in modules if any(path.endswith(candidate) for candidate in candidates)]
+    if not matches:
+        packages = [candidate.strip("/") for candidate in candidates]
+        matches = [
+            module_path for module_path in modules
+            if any(PurePosixPath(module_path).parent.as_posix().endswith(package) for package in packages if package)
+        ]
+    return sorted(matches, key=len)[0] if len(matches) == 1 else None
+
+
 def _resolve_import(source_path: str, specifier: str, modules: dict[str, Module], config: BehaviorConfig) -> str | None:
-    if not specifier.startswith("."):
+    raw_specifier = specifier.replace("\\", "/")
+    raw = PurePosixPath(raw_specifier)
+    candidates: list[str] = []
+
+    if raw_specifier.startswith("."):
+        raw = PurePosixPath(source_path).parent / raw_specifier
+        candidates.extend([raw.as_posix(), raw.as_posix().lstrip("./")])
+    elif config.language in {"typescript", "javascript"}:
         return None
-    base = PurePosixPath(source_path).parent / specifier
-    raw = PurePosixPath(base)
-    candidates = [raw.as_posix()]
-    for extension in config.extensions:
-        candidates.append(f"{raw.as_posix()}{extension}")
-        candidates.append(f"{raw.as_posix()}/index{extension}")
-    if raw.suffix in {".js", ".jsx", ".ts", ".tsx"}:
-        stem = raw.with_suffix("")
+    elif config.language == "java":
+        candidates.append(raw_specifier.replace(".", "/"))
+    elif config.language == "csharp":
+        candidates.append(raw_specifier.replace(".", "/"))
+    elif config.language == "go":
+        package = raw_specifier.rstrip("/").rsplit("/", 1)[-1]
+        candidates.extend([package, f"{package}/{package}"])
+    elif config.language == "rust":
+        parts = [part for part in raw_specifier.split("::") if part not in {"crate", "self", "super"}]
+        candidates.append("/".join(parts))
+    elif config.language == "php":
+        candidates.append(raw_specifier.replace("/", "/"))
+    else:
+        candidates.append(raw_specifier)
+
+    expanded: list[str] = []
+    for candidate in candidates:
+        candidate = candidate.strip("/")
+        expanded.append(candidate)
         for extension in config.extensions:
-            candidates.append(f"{stem.as_posix()}{extension}")
-    return next((candidate for candidate in candidates if candidate in modules), None)
+            expanded.append(f"{candidate}{extension}")
+            expanded.append(f"{candidate}/index{extension}")
+            expanded.append(f"{candidate}/mod{extension}")
+    if raw.suffix in {".js", ".jsx", ".ts", ".tsx"}:
+        expanded.extend(f"{raw.with_suffix('').as_posix()}{extension}" for extension in config.extensions)
+    return _suffix_match("", list(dict.fromkeys(expanded)), modules)
 
 
 def _bind_imports(modules: dict[str, Module], config: BehaviorConfig) -> None:
@@ -274,12 +510,23 @@ def _bind_imports(modules: dict[str, Module], config: BehaviorConfig) -> None:
                 continue
             if item.namespace:
                 module.namespaces[item.local] = target_path
+                if item.imported == "*":
+                    target = modules.get(target_path)
+                    if target:
+                        for symbol in target.symbols:
+                            leaf = symbol.rsplit(".", 1)[-1]
+                            if leaf != MODULE:
+                                module.bindings.setdefault(leaf, SymbolRef(path=target_path, symbol=symbol))
+                        if config.language == "csharp":
+                            for symbol in target.symbols:
+                                if "." not in symbol:
+                                    module.namespaces.setdefault(symbol, target_path)
             else:
                 module.bindings[item.local] = SymbolRef(path=target_path, symbol=item.imported)
 
 
 def _callee_parts(callee: str) -> tuple[str, str | None]:
-    match = re.fullmatch(r"([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)", callee)
+    match = re.fullmatch(r"([A-Za-z_$][\w$]*)\s*(?:\.|::|->)\s*([A-Za-z_$][\w$]*)", callee)
     return (match.group(1), match.group(2)) if match else (callee, None)
 
 
@@ -290,6 +537,10 @@ def _resolve_call(module: Module, call: CallRef, modules: dict[str, Module]) -> 
         target = modules.get(target_path)
         if target and member in target.symbols:
             return SymbolRef(path=target_path, symbol=member), ""
+        if target:
+            candidates = [symbol for symbol in target.symbols if symbol.rsplit(".", 1)[-1] == member]
+            if len(candidates) == 1:
+                return SymbolRef(path=target_path, symbol=candidates[0]), ""
         return None, "dynamic member access"
 
     if not member and name in module.bindings:
@@ -297,8 +548,11 @@ def _resolve_call(module: Module, call: CallRef, modules: dict[str, Module]) -> 
     if not member and name in module.symbols:
         return SymbolRef(path=module.path, symbol=name), ""
 
-    if member and name == "this":
-        owner = call.caller.rsplit(".", 1)[0] if "." in call.caller else None
+    owner = call.caller.rsplit(".", 1)[0] if "." in call.caller else None
+    if not member and owner and f"{owner}.{name}" in module.symbols:
+        return SymbolRef(path=module.path, symbol=f"{owner}.{name}"), ""
+
+    if member and name in {"this", "self", "base", "super"}:
         candidate = f"{owner}.{member}" if owner else member
         if candidate in module.symbols:
             return SymbolRef(path=module.path, symbol=candidate), ""

@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import fnmatch
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -74,23 +76,32 @@ def _hash_extensions(root: Path, extensions: tuple[str, ...]) -> str:
     return hashlib.sha256(payload).hexdigest()[:16]
 
 
-def _resolve_command(template: tuple[str, ...], python: str) -> list[str]:
+def _resolve_command(template: tuple[str, ...], python: str, tests: str | None = None) -> list[str]:
     """Expand the configured argv without invoking a shell."""
 
-    return [python if token in {"python", "python3", "{python}"} else token for token in template]
+    return [
+        python if token in {"python", "python3", "{python}"}
+        else tests if tests is not None and token in {"{tests}", "${TESTS}"}
+        else token
+        for token in template
+    ]
 
 
-def _pytest_counts(stdout: str) -> tuple[int, int, int]:
+def _pytest_counts(stdout: str) -> tuple[int, int, int] | None:
     tail = stdout.strip().splitlines()[-1] if stdout.strip() else ""
     match = lambda word: int(re.search(rf"(\d+)\s+{word}", tail).group(1)) if re.search(rf"(\d+)\s+{word}", tail) else 0
-    return match("passed"), match("failed"), match("error")
+    if not re.search(r"\d+\s+(?:passed|failed|error|errors?)", tail):
+        return None
+    return match("passed"), match("failed"), match("error") or match("errors")
 
 
-def _vitest_counts(stdout: str) -> tuple[int, int, int]:
+def _vitest_counts(stdout: str) -> tuple[int, int, int] | None:
     try:
         payload = json.loads(stdout)
     except json.JSONDecodeError:
-        return 0, 0, 0
+        return None
+    if not isinstance(payload, dict):
+        return None
     passed = int(payload.get("numPassedTests", 0) or 0)
     failed = int(payload.get("numFailedTests", 0) or 0)
     errors = int(payload.get("numRuntimeErrorTestSuites", 0) or 0)
@@ -102,7 +113,215 @@ def _vitest_counts(stdout: str) -> tuple[int, int, int]:
                     passed += 1
                 elif status == "failed":
                     failed += 1
-    return passed, failed, errors
+    return (passed, failed, errors) if (passed or failed or errors or "testResults" in payload) else None
+
+
+def _go_test_counts(stdout: str) -> tuple[int, int, int] | None:
+    passed = failed = skipped = 0
+    saw_json = saw_test = False
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        saw_json = True
+        if "Test" not in event:
+            continue
+        saw_test = True
+        action = event.get("Action")
+        if action == "pass":
+            passed += 1
+        elif action == "fail":
+            failed += 1
+        elif action == "skip":
+            skipped += 1
+    if not saw_json:
+        return None
+    return (passed, failed + skipped, 0) if saw_test else (0, 0, 0)
+
+
+def _xml_counts(text: str) -> tuple[int, int, int] | None:
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return None
+    counters = next(
+        (node for node in root.iter() if node.tag.rsplit("}", 1)[-1] == "Counters"),
+        None,
+    )
+    if counters is not None and any(key in counters.attrib for key in ("total", "passed", "failed", "error")):
+        passed = int(counters.attrib.get("passed", 0) or 0)
+        failed = int(counters.attrib.get("failed", 0) or 0)
+        errors = int(counters.attrib.get("error", counters.attrib.get("errors", 0)) or 0)
+        return passed, failed, errors
+    suites = [root] if root.tag.rsplit("}", 1)[-1] == "testsuite" else list(root.iter())
+    test_suites = [node for node in suites if node.tag.rsplit("}", 1)[-1] == "testsuite"]
+    if not test_suites:
+        return None
+    total = failures = errors = skipped = 0
+    for suite in test_suites:
+        total += int(suite.attrib.get("tests", 0) or 0)
+        failures += int(suite.attrib.get("failures", 0) or 0)
+        errors += int(suite.attrib.get("errors", 0) or 0)
+        skipped += int(suite.attrib.get("skipped", 0) or 0)
+    return max(0, total - failures - errors - skipped), failures + skipped, errors
+
+
+def _ctest_counts(stdout: str) -> tuple[int, int, int] | None:
+    match = re.search(r"(\d+)% tests passed,\s+(\d+) tests failed out of (\d+)", stdout)
+    if match:
+        failed = int(match.group(2))
+        total = int(match.group(3))
+        return total - failed, failed, 0
+    match = re.search(r"(\d+) tests passed", stdout)
+    if match:
+        return int(match.group(1)), 0, 0
+    return None
+
+
+def _cargo_counts(stdout: str) -> tuple[int, int, int] | None:
+    match = re.search(r"test result:\s+\w+\.\s+(\d+) passed;\s+(\d+) failed;\s+(\d+) ignored", stdout)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2)) + int(match.group(3)), 0
+
+
+def _phpunit_counts(stdout: str) -> tuple[int, int, int] | None:
+    match = re.search(r"Tests:\s+(\d+).*?Failures:\s+(\d+)(?:,\s*Errors:\s+(\d+))?", stdout, flags=re.DOTALL)
+    if not match:
+        return None
+    total, failures, errors = (int(value or 0) for value in match.groups())
+    return max(0, total - failures - errors), failures, errors
+
+
+def _rspec_counts(stdout: str) -> tuple[int, int, int] | None:
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    summary = payload.get("summary") if isinstance(payload, dict) else None
+    if not isinstance(summary, dict) or "example_count" not in summary:
+        return None
+    total = int(summary.get("example_count", 0) or 0)
+    failed = int(summary.get("failure_count", 0) or 0)
+    return max(0, total - failed), failed, 0
+
+
+def _swift_counts(stdout: str) -> tuple[int, int, int] | None:
+    match = re.search(r"Executed\s+(\d+)\s+tests?,\s+with\s+(\d+)\s+failures?", stdout, flags=re.IGNORECASE)
+    if not match:
+        return None
+    total, failed = (int(value) for value in match.groups())
+    return max(0, total - failed), failed, 0
+
+
+def _dart_counts(stdout: str) -> tuple[int, int, int] | None:
+    passed = failed = skipped = 0
+    saw_event = False
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        kind = str(event.get("type", "")).lower()
+        result = str(event.get("result", event.get("status", ""))).lower()
+        if kind in {"testdone", "test_done", "test"}:
+            saw_event = True
+            if result in {"success", "passed", "pass"}:
+                passed += 1
+            elif result in {"skipped", "skip"}:
+                skipped += 1
+            else:
+                failed += 1
+    return (passed, failed + skipped, 0) if saw_event else None
+
+
+def _shell_counts(stdout: str) -> tuple[int, int, int] | None:
+    passed = len(re.findall(r"^\s*PASS(?:\s|$)", stdout, flags=re.MULTILINE | re.IGNORECASE))
+    failed = len(re.findall(r"^\s*FAIL(?:\s|$)", stdout, flags=re.MULTILINE | re.IGNORECASE))
+    return (passed, failed, 0) if passed or failed else None
+
+
+def _report_file(checkout: Path, report: str) -> str:
+    suffixes = {"junit-xml": ("*.xml",), "trx-xml": ("*.trx", "*.xml")}
+    roots = ("target", "build", "test-results", "TestResults", ".")
+    for root in roots:
+        base = checkout / root
+        if not base.exists():
+            continue
+        for pattern in suffixes.get(report, ()):
+            for path in base.rglob(pattern):
+                if path.is_file() and not any(part in {"node_modules", ".venv", ".git"} for part in path.parts):
+                    try:
+                        return path.read_text(encoding="utf-8")
+                    except OSError:
+                        pass
+    return ""
+
+
+def _parse_report(checkout: Path, stdout: str, report: str) -> tuple[int, int, int] | None:
+    if report == "pytest-text":
+        return _pytest_counts(stdout)
+    if report == "vitest-json":
+        return _vitest_counts(stdout)
+    if report == "go-test-json":
+        return _go_test_counts(stdout)
+    if report in {"junit-xml", "trx-xml"}:
+        return _xml_counts(stdout) or _xml_counts(_report_file(checkout, report))
+    if report == "ctest-text":
+        return _ctest_counts(stdout)
+    if report == "cargo-text":
+        return _cargo_counts(stdout)
+    if report == "phpunit-text":
+        return _phpunit_counts(stdout)
+    if report == "rspec-json":
+        return _rspec_counts(stdout)
+    if report == "swift-text":
+        return _swift_counts(stdout)
+    if report == "dart-json":
+        return _dart_counts(stdout)
+    if report == "shell-text":
+        return _shell_counts(stdout)
+    return None
+
+
+def _freeze_tests(source: Path, tests_rel: str, frozen: Path, config: BehaviorConfig) -> None:
+    destination = frozen / "tests"
+    if tests_rel not in {"", "."}:
+        shutil.copytree(source, destination)
+        return
+    if not source.exists():
+        raise FileNotFoundError(f"test root '{tests_rel}' does not exist")
+    for path in source.rglob("*"):
+        if not path.is_file() or any(part in {".git", ".venv", "node_modules", "build", "dist"} for part in path.parts):
+            continue
+        relative = path.relative_to(source).as_posix()
+        if not any(fnmatch.fnmatch(path.name, pattern) for pattern in config.test_file_patterns):
+            continue
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+
+
+def _install_frozen_tests(checkout: Path, tests_rel: str, frozen: Path) -> None:
+    source = frozen / "tests"
+    if tests_rel not in {"", "."}:
+        destination = checkout / tests_rel
+        if destination.exists():
+            shutil.rmtree(destination)
+        shutil.copytree(source, destination)
+        return
+    for path in source.rglob("*"):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(source)
+        destination = checkout / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, destination)
 
 
 # --- the two things we execute ------------------------------------------------
@@ -112,8 +331,8 @@ def run_suite(checkout: Path, tests_rel: str, suite_hash: str, python: str, revi
               config: BehaviorConfig | None = None):
     """Run the frozen test suite and parse the configured reporter."""
     settings = config or BehaviorConfig()
-    command = _resolve_command(settings.test_command, python)
-    if tests_rel not in command:
+    command = _resolve_command(settings.test_command, python, tests_rel)
+    if settings.append_tests and "{tests}" not in settings.test_command and "${TESTS}" not in settings.test_command and tests_rel not in command:
         command.append(tests_rel)
     try:
         proc = _run(command, checkout, timeout=TIMEOUT_S)
@@ -123,9 +342,10 @@ def run_suite(checkout: Path, tests_rel: str, suite_hash: str, python: str, revi
     except subprocess.TimeoutExpired:
         counts = dict(status=RunStatus.TIMEOUT, passed=0, failed=0, errors=0)
         return _suite_run(revision, sha, suite_hash, **counts)
-    passed, failed, errors = (
-        _vitest_counts(proc.stdout) if settings.test_report == "vitest-json" else _pytest_counts(proc.stdout)
-    )
+    parsed = _parse_report(checkout, proc.stdout, settings.test_report)
+    if parsed is None:
+        return _suite_run(revision, sha, suite_hash, RunStatus.ERROR, 0, 0, 1)
+    passed, failed, errors = parsed
     status = RunStatus.OK if proc.returncode == 0 else RunStatus.ERROR
     return _suite_run(revision, sha, suite_hash, status, passed, failed, errors)
 
@@ -258,7 +478,7 @@ def compare(pair, bundle=None, python: str | None = None, probes_dir: str = PROB
     # Freeze the base test suite and the probe runner before touching any checkout.
     with tempfile.TemporaryDirectory(prefix="behavior-review-frozen-") as tmp:
         frozen = Path(tmp)
-        shutil.copytree(base_wt / tests_rel, frozen / "tests")
+        _freeze_tests(base_wt / tests_rel, tests_rel, frozen, settings)
         suite_hash = _hash_extensions(frozen / "tests", settings.extensions)
         runner_rel = next(
             (token for token in settings.probe_runner if token.endswith((".py", ".ts", ".tsx", ".js", ".mjs"))),
@@ -275,10 +495,7 @@ def compare(pair, bundle=None, python: str | None = None, probes_dir: str = PROB
         suites = []
         for revision, wt, sha in (("base", base_wt, pair.revisions.base_sha),
                                   ("head", head_wt, pair.revisions.head_sha)):
-            dest = wt / tests_rel
-            if dest.exists():
-                shutil.rmtree(dest)
-            shutil.copytree(frozen / "tests", dest)
+            _install_frozen_tests(wt, tests_rel, frozen)
             suites.append(run_suite(wt, tests_rel, suite_hash, python, revision, sha, settings))
 
         comparisons, probed = [], set()
@@ -306,7 +523,19 @@ def _target_ref(spec: dict, config: BehaviorConfig) -> tuple[str, str]:
         if not path.endswith(config.extensions):
             path += config.extensions[0]
         return path, symbol
-    return path.replace(".", "/") + ".py", symbol
+    language_extension = {
+        "python": ".py",
+        "typescript": ".ts",
+        "javascript": ".js",
+        "java": ".java",
+        "csharp": ".cs",
+        "go": ".go",
+        "cpp": ".cpp",
+        "c": ".c",
+        "rust": ".rs",
+        "php": ".php",
+    }.get(config.language, config.extensions[0])
+    return path.replace(".", "/") + language_extension, symbol
 
 
 def _comparison(probe_file: Path, spec: dict, pair, b, h, outcome, config: BehaviorConfig | None = None):

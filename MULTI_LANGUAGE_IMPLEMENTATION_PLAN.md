@@ -1,6 +1,6 @@
 # Multi-language Behavior Review — Implementation Plan
 
-Status: engine slices 0–4 implemented and verified on this branch. Report/viewer integration remains dependent on the final report consumer being present on the target branch; release/demo evidence is intentionally not claimed yet.
+Status: engine slices 0–4 and the Group 2/3/4 language expansion are implemented and verified on this branch. Report/viewer integration and real compiler-toolchain demo evidence remain release gates.
 
 Branch: `feat/multi-language-support`
 
@@ -15,6 +15,8 @@ Current progress:
 - [x] Slice 2 — behavior-preserving analyzer dispatch seam.
 - [x] Slice 3 — TypeScript/JavaScript Tree-sitter adapter with unknown-edge coverage.
 - [x] Slice 4 — configured test reporter and probe execution support.
+- [x] Expansion — Java, C#, Go, C++, C, Rust, and PHP adapters/configuration.
+- [x] Expansion — Kotlin, Ruby, Swift, Dart, and Bash adapters/configuration.
 - [ ] Slice 5 — report/viewer integration on a branch containing the C report consumer.
 - [ ] Slice 6 — final release documentation and demo evidence; README/configuration notes are updated, but final demo evidence still needs the report consumer.
 
@@ -47,12 +49,12 @@ The output must preserve the existing concepts:
 - Building a polyglot repository graph.
 - Adding a database, service, webhook server, or autonomous fix loop.
 
-TypeScript/JavaScript is the first additional target. Other languages remain future adapters.
+TypeScript/JavaScript were the first additional targets. Java, C#, Go, C++, C, Rust, and PHP are now the next adapters; further languages remain future work.
 
 ## Current repository condition
 
 - Python remains the default analysis language and keeps its existing `ast` implementation.
-- TypeScript/JavaScript analysis is available through the optional Tree-sitter adapter in `app/impact_treesitter.py`.
+- TypeScript/JavaScript plus Java, C#, Go, C++, C, Rust, PHP, Kotlin, Ruby, Swift, Dart, and Bash analysis are available through explicit adapters backed by `app/impact_treesitter.py`.
 - `app/runner.py` accepts configured argv commands and supports pytest text plus Vitest JSON counts, while preserving paired evidence semantics.
 - `app/schemas.py` is the cross-lane contract and must remain authoritative.
 - `multi-language-1.md` is the source design draft and remains unchanged.

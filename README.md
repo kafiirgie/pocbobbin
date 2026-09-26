@@ -74,16 +74,19 @@ treated as safe.
 pytest -q
 ```
 
-### Optional TypeScript/JavaScript analysis
+### Optional multi-language analysis
 
 Python remains the default and requires no configuration file. A repository can opt into the
-Tree-sitter adapter with the optional dependencies:
+Tree-sitter adapters with the optional dependencies:
 
 ```bash
 pip install -e ".[dev,multilang]"
 ```
 
-Add `behavior.json` at the repository root to select the language and its real test/probe
+The adapter registry currently accepts Python, TypeScript, JavaScript, Java, C#, Go, C++, C,
+Rust, PHP, Kotlin, Ruby, Swift, Dart, and Bash. Full support for a language still requires a
+real repository/toolchain fixture and process-output verification in CI.
+Add `behavior.json` at the repository root to select one language and its real test/probe
 commands. Commands are argument arrays, not shell strings:
 
 ```json
@@ -100,6 +103,14 @@ commands. Commands are argument arrays, not shell strings:
 ```
 
 The adapter resolves direct, statically visible calls. Dynamic dispatch, reflection, unresolved
-imports, and unsupported build behavior remain unknown or inconclusive; they are never treated
-as proof of no impact. `tools/run_probe.ts` emits the same JSON probe shape as the Python
-harness. The configured TypeScript runtime must be installed by the reviewed repository.
+imports, generated code, macros, and unsupported build behavior remain unknown or inconclusive;
+they are never treated as proof of no impact. The configured runtime and build tool must be
+installed by the reviewed repository. TypeScript/JavaScript probes can use
+`tools/run_probe.ts`; compiled-language repositories can use `tools/run_command_probe.py` with a
+probe `command` array and `{input}` placeholder.
+
+Language-specific test report names include `pytest-text`, `vitest-json`, `junit-xml`, `trx-xml`,
+`go-test-json`, `ctest-text`, `cargo-text`, `phpunit-text`, `rspec-json`, `swift-text`,
+`dart-json`, and `shell-text`. An unparseable report is inconclusive rather than a passing
+result. Every configured language has an explicit entry in `app/adapters/registry.py`; the
+Tree-sitter implementation is shared, but language selection is not implicit.

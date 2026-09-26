@@ -21,7 +21,7 @@ from app.snapshot import SnapshotError, open_pair
 def _limits(impact: ImpactResult, executed: bool, unprobed: list[SymbolRef]) -> list[str]:
     limits = [
         f"Callers traced up to {impact.max_hops} hops; deeper callers are not shown.",
-        "Impact is static (AST): calls through variables, dynamic dispatch or class hierarchies may be missed. "
+        "Impact is static parser analysis: calls through variables, dynamic dispatch or class hierarchies may be missed. "
         "Unresolved references that could reach a changed symbol are listed as unknowns, not as safe.",
     ]
     if executed:

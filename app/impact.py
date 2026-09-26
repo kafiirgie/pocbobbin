@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from importlib.util import resolve_name
 from pathlib import Path, PurePosixPath
 
+from app.adapters import get_adapter
 from app.config import BehaviorConfig, load_config
 from app.schemas import (
     ChangedSymbol,
@@ -421,8 +422,5 @@ def analyze(
 
     settings = config or load_config(pair.root)
     effective_hops = settings.max_hops if max_hops is None else max_hops
-    if settings.language == "python":
-        return _analyze_python(pair, effective_hops)
-    from app.impact_treesitter import analyze as analyze_treesitter
-
-    return analyze_treesitter(pair, effective_hops, settings)
+    adapter = get_adapter(settings.language)
+    return adapter.analyze(pair, effective_hops, settings)
