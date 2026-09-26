@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "behavior-review"
 version = "0.1.0"
 description = "Behavior review before and after a PR: impact graph, paired execution, human decisions."
-readme = "FINAL_PLAN.md"
+readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = ["pydantic>=2.6"]

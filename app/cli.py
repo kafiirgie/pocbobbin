@@ -42,11 +42,14 @@ def _summary(report: ReviewReport) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="behavior-review", description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog="behavior-review",
+        description="Find what a change between two commits could affect, including callers outside the diff.",
+    )
     parser.add_argument("--repo", default=".", help="Path inside the git repository (default: .)")
     parser.add_argument("--base", default="main", help="Base revision (default: main)")
     parser.add_argument("--head", default="HEAD", help="Head revision (default: HEAD)")
-    parser.add_argument("--max-hops", type=int, default=2)
+    parser.add_argument("--max-hops", type=int, default=2, help="Caller levels to trace back (default: 2)")
     parser.add_argument("--json", type=Path, help="Write the ReviewReport JSON here instead of stdout")
     args = parser.parse_args(argv)
     # Windows pipes default to the ANSI codepage, which can't encode the "→" in impact paths.
