@@ -93,6 +93,7 @@ touched, returns a different number for the same input.
 | `--repo` | `.` | Any path inside the git repository |
 | `--max-hops` | `2` | How many caller levels to trace back from each changed symbol |
 | `--run` | off | Also run the frozen base test suite and `probes/*.json` on both revisions |
+| `--prior-report PATH` | — | An earlier `report.json`: a probe that showed a delta there and shows none now is linked to it (`reruns`), but only if the probe bytes are unchanged |
 | `--json PATH` | stdout | Where to write the report JSON |
 | `--markdown PATH` | — | Also write the report as Markdown (the PR comment body) |
 

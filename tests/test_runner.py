@@ -190,12 +190,19 @@ def test_rerun_links_to_the_earlier_delta():
     assert {"apply_discount_contract", "price_total_boundary"} <= deltas
 
     # second pass on an unchanged head: no delta, so nothing is linked
-    after = pipeline(REPO, BASE, "origin/scenario1-head", run=True, prior_report=before.model_dump_json())
+    after = pipeline(REPO, BASE, "origin/scenario1-head", run=True, prior_report=before)
     for comp in after.comparisons:
         if comp.outcome == Outcome.SAME_ON_TESTED_CASES:
             assert comp.reruns is None, "nothing to resolve when the probe still reports the same"
     # the probes that DO still show a delta keep their delta, and are not relabelled
     assert {c.probe.id for c in after.comparisons if c.outcome == Outcome.DELTA_OBSERVED} == deltas
+
+    # third pass on fixed code (the base behavior restored): each earlier delta is linked,
+    # and a probe that never showed a delta is not
+    fixed = pipeline(REPO, BASE, BASE, run=True, prior_report=before)
+    linked = {c.probe.id: c.reruns for c in fixed.comparisons}
+    assert all(linked[probe_id] == probe_id for probe_id in deltas)
+    assert all(linked[probe_id] is None for probe_id in linked.keys() - deltas)
 
 
 def test_rerun_requires_the_unchanged_probe(tmp_path):

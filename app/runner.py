@@ -239,8 +239,8 @@ def _prior_delta_probes(prior_report) -> dict[str, str]:
         return {}
     if isinstance(prior_report, (str, Path)):
         try:
-            prior_report = json.loads(Path(prior_report).read_text())
-        except (OSError, json.JSONDecodeError):
+            prior_report = json.loads(Path(prior_report).read_text(encoding="utf-8"))
+        except (OSError, ValueError):  # ValueError covers bad JSON and undecodable bytes
             return {}
     if HAS_SCHEMA and isinstance(prior_report, ReviewReport):  # noqa: F821 - guarded by HAS_SCHEMA
         prior_report = json.loads(prior_report.model_dump_json())

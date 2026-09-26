@@ -19,13 +19,12 @@
     unparseable files.
 - `app/cli.py` — `pipeline(repo, base, head, max_hops, run=False)`: impact, then prior decisions via
   D's `decisions.lookup` (matched on path + symbol, superseded ones relabeled), then with `run` B's
-  `runner.compare(pair, impact=impact)`. CLI: `--base --head --max-hops --run --json --markdown`
+  `runner.compare(pair, impact=impact)`. CLI: `--base --head --max-hops --run --prior-report --json --markdown`
   (`--markdown` uses C's `report.render_markdown`).
 - `contracts/report_scenario1.json` — generated from a real `--run` of scenario 1, labeled fixture.
 
 ## Checks run
-`pytest -q` → 53 passed, 1 failed (B's `test_compare_survives_a_base_without_the_harness` fetches a
-local `scenario1-head` branch that only exists on B's machine; also fails on `main`).
+`pytest -q` → 57 passed on Windows (whole suite, all lanes).
 `behavior-review --base ref/base --head origin/scenario1-head --run` → tests 6/6 green on both sides,
 `price_total` (invoice.py:25) outside the diff, `delta_observed` 100.0 → 99.99, cites decision
 `951cc25e49ee`. On lane C's merge range, unknowns dropped from 35 to 7 after the local-name fix,

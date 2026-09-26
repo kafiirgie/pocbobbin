@@ -18,10 +18,10 @@ Work on a short-lived branch off `main` and merge through a PR.
 
 | Function | Input → Output | Owner |
 |---|---|---|
-| `cli.pipeline(repo, base, head, max_hops, run)` | → `ReviewReport`; every door calls this | A |
+| `cli.pipeline(repo, base, head, max_hops, run, prior_report)` | → `ReviewReport`; every door calls this | A |
 | `snapshot.open_pair(repo, base, head)` | → `RevisionPair` (detached worktrees; `pair.revisions` has SHAs + changed files) | A |
 | `impact.analyze(pair, max_hops)` | → `ImpactResult` (changed symbols, edges, paths, unknowns) | A |
-| `runner.compare(pair, impact=...)` | → `SuiteRun`s, `Comparison`s, `needs_bob_action`, notes | B |
+| `runner.compare(pair, impact=..., prior_report=...)` | → `SuiteRun`s, `Comparison`s (with `reruns`), `needs_bob_action`, notes | B |
 | `decisions.validate_and_save` / `lookup` | delta + disposition → `Decision`; symbols → prior matches | D |
 | `report.render_markdown` / `to_web_data` | `ReviewReport` → Markdown (PR comment) / web data | C |
 
