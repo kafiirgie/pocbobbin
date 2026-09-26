@@ -1,13 +1,13 @@
 {
   "schema_version": "0.1",
   "fixture": false,
-  "generated_at": "2026-09-26T10:51:55.085421Z",
+  "generated_at": "2026-09-26T11:11:44.156998Z",
   "repo": "webdev-testa/pocbobbin",
   "revisions": {
-    "base_ref": "ref/base",
-    "head_ref": "origin/scenario1-head",
-    "base_sha": "1cb1511c4eb3f3c1b955cb9b97c24033d8be15d0",
-    "head_sha": "13ffdbba777771c706ec46dfaa34ec9147fc451b",
+    "base_ref": "origin/fix/lane-a-review",
+    "head_ref": "HEAD",
+    "base_sha": "d1d74666451638354f0cfd41f3de627983978f75",
+    "head_sha": "bb2edfc737d7f239f0f8e5faf05561b8520b14dd",
     "changed_files": [
       "sample_project/pricing/discount.py"
     ]
@@ -198,21 +198,21 @@
   "tests": [
     {
       "revision": "base",
-      "sha": "1cb1511c4eb3f3c1b955cb9b97c24033d8be15d0",
+      "sha": "d1d74666451638354f0cfd41f3de627983978f75",
       "status": "ok",
       "passed": 6,
       "failed": 0,
       "errors": 0,
-      "suite_hash": "cf76879b16e92a06"
+      "suite_hash": "9778630411a22608"
     },
     {
       "revision": "head",
-      "sha": "13ffdbba777771c706ec46dfaa34ec9147fc451b",
+      "sha": "bb2edfc737d7f239f0f8e5faf05561b8520b14dd",
       "status": "ok",
       "passed": 6,
       "failed": 0,
       "errors": 0,
-      "suite_hash": "cf76879b16e92a06"
+      "suite_hash": "9778630411a22608"
     }
   ],
   "comparisons": [
@@ -234,22 +234,22 @@
       },
       "base": {
         "revision": "base",
-        "sha": "1cb1511c4eb3f3c1b955cb9b97c24033d8be15d0",
+        "sha": "d1d74666451638354f0cfd41f3de627983978f75",
         "status": "ok",
         "output": 100.0,
         "exception": null,
-        "duration_ms": 45
+        "duration_ms": 18
       },
       "head": {
         "revision": "head",
-        "sha": "13ffdbba777771c706ec46dfaa34ec9147fc451b",
+        "sha": "bb2edfc737d7f239f0f8e5faf05561b8520b14dd",
         "status": "ok",
         "output": 99.99,
         "exception": null,
-        "duration_ms": 46
+        "duration_ms": 17
       },
       "outcome": "delta_observed",
-      "ran_at": "2026-09-26T10:51:54.814223Z",
+      "ran_at": "2026-09-26T11:11:44.075818Z",
       "reruns": null
     },
     {
@@ -265,27 +265,27 @@
             40.0
           ]
         },
-        "hash": "sha256:1a4c3ef89d3f5cdb",
+        "hash": "sha256:da3bc559473826fc",
         "authored_by": "human"
       },
       "base": {
         "revision": "base",
-        "sha": "1cb1511c4eb3f3c1b955cb9b97c24033d8be15d0",
+        "sha": "d1d74666451638354f0cfd41f3de627983978f75",
         "status": "ok",
         "output": 60.0,
         "exception": null,
-        "duration_ms": 46
+        "duration_ms": 17
       },
       "head": {
         "revision": "head",
-        "sha": "13ffdbba777771c706ec46dfaa34ec9147fc451b",
+        "sha": "bb2edfc737d7f239f0f8e5faf05561b8520b14dd",
         "status": "ok",
         "output": 60.0,
         "exception": null,
-        "duration_ms": 47
+        "duration_ms": 17
       },
       "outcome": "same_on_tested_cases",
-      "ran_at": "2026-09-26T10:51:54.909253Z",
+      "ran_at": "2026-09-26T11:11:44.111287Z",
       "reruns": null
     },
     {
@@ -317,22 +317,22 @@
       },
       "base": {
         "revision": "base",
-        "sha": "1cb1511c4eb3f3c1b955cb9b97c24033d8be15d0",
+        "sha": "d1d74666451638354f0cfd41f3de627983978f75",
         "status": "ok",
         "output": 100.0,
         "exception": null,
-        "duration_ms": 49
+        "duration_ms": 20
       },
       "head": {
         "revision": "head",
-        "sha": "13ffdbba777771c706ec46dfaa34ec9147fc451b",
+        "sha": "bb2edfc737d7f239f0f8e5faf05561b8520b14dd",
         "status": "ok",
         "output": 99.99,
         "exception": null,
-        "duration_ms": 50
+        "duration_ms": 20
       },
       "outcome": "delta_observed",
-      "ran_at": "2026-09-26T10:51:55.010168Z",
+      "ran_at": "2026-09-26T11:11:44.151893Z",
       "reruns": null
     }
   ],
@@ -362,5 +362,8 @@
     "Callers traced up to 2 hops; deeper callers are not shown.",
     "Impact is static (AST): calls through variables, dynamic dispatch or class hierarchies may be missed. Unresolved references that could reach a changed symbol are listed as unknowns, not as safe.",
     "'same_on_tested_cases' means identical output for these frozen inputs only; it is not proof of equivalence."
-  ]
+  ],
+  "links": {
+    "action_run": "https://github.com/webdev-testa/pocbobbin/actions/runs/36238046471"
+  }
 }

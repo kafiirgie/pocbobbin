@@ -218,3 +218,6 @@ class ReviewReport(Model):
     decisions: list[Decision] = Field(default_factory=list)
     prior_decisions: list[Decision] = Field(default_factory=list, description="Ledger records at the base revision for changed or impacted symbols (same path + symbol).")
     limits: list[str] = Field(default_factory=list)
+    links: dict[str, str] = Field(
+        default_factory=dict, description="Where this run's evidence lives, e.g. action_run: URL of the CI run."
+    )

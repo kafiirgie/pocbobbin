@@ -125,7 +125,14 @@ def _render(value) -> str:
     return json.dumps(value, sort_keys=True) if not isinstance(value, str) else value
 
 
-def main(argv: list[str] | None = None) -> int:
+def _link(value: str) -> tuple[str, str]:
+    name, sep, url = value.partition("=")
+    if not (sep and name and url.startswith(("https://", "http://"))):
+        raise argparse.ArgumentTypeError(f"expected NAME=URL, got {value!r}")
+    return name, url
+
+
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="behavior-review",
         description="Find what a change between two commits could affect, including callers outside the diff.",
@@ -148,7 +155,19 @@ def main(argv: list[str] | None = None) -> int:
         help="An earlier report.json. A probe that showed a delta there and shows none now is "
              "linked to that delta via Comparison.reruns (the plan's fix-and-rerun step).",
     )
-    args = parser.parse_args(argv)
+    parser.add_argument(
+        "--link",
+        type=_link,
+        action="append",
+        default=[],
+        metavar="NAME=URL",
+        help="Record where this run's evidence lives, e.g. action_run=<CI run URL> (repeatable)",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
     # Windows pipes default to the ANSI codepage, which can't encode the "→" in impact paths.
     sys.stdout.reconfigure(encoding="utf-8")
 
@@ -158,6 +177,7 @@ def main(argv: list[str] | None = None) -> int:
     except SnapshotError as exc:
         print(f"behavior-review: {exc}", file=sys.stderr)
         return 2
+    report.links = dict(args.link)
 
     payload = report.model_dump_json(indent=2)
     if args.json:

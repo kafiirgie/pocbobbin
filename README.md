@@ -96,6 +96,7 @@ touched, returns a different number for the same input.
 | `--prior-report PATH` | — | An earlier `report.json`: a probe that showed a delta there and shows none now is linked to it (`reruns`), but only if the probe bytes are unchanged |
 | `--json PATH` | stdout | Where to write the report JSON |
 | `--markdown PATH` | — | Also write the report as Markdown (the PR comment body) |
+| `--link NAME=URL` | — | Record where this run's evidence lives, e.g. `action_run=<CI run URL>` (repeatable) |
 
 Exit code is `0` on success and `2` if a revision can't be resolved.
 
@@ -113,8 +114,8 @@ is recorded with `app.decisions.validate_and_save`.
 ## On every PR: GitHub Action
 
 `.github/workflows/behavior-review.yml` runs on each pull request push: it runs the CLI with `--run`
-against the PR's base branch, uploads `report.json` as a build artifact, and creates or updates one PR
-comment with the evidence. It reuses committed probes and never calls Bob; if an impacted caller has
+against the PR's base branch, uploads `report.json` as a build artifact (stamped with `links.action_run`,
+the URL of that run's public log), and creates or updates one PR comment with the evidence. It reuses committed probes and never calls Bob; if an impacted caller has
 no probe, the comment says so (`needs_bob_action`).
 
 ## Decision ledger
@@ -126,8 +127,10 @@ labeled as such. History informs a review; it never approves a new difference.
 
 ## Web evidence viewer
 
-`web/` is a static React viewer for a report (impact paths, old vs new outputs, decisions). See
-`web/README.md` to run or deploy it. Decisions made there are session-only and approve nothing.
+`web/` is a static React viewer for a report (impact paths, old vs new outputs, decisions). It ships
+the unmodified `report.json` artifact of the Action run on the Scenario 1 demo PR, and links to that
+run's public log. See `web/README.md` to run or deploy it. Decisions made there are session-only and
+approve nothing.
 
 ## Limits
 
