@@ -21,22 +21,24 @@
     non-test callers outside the diff sort first.
   - Unknowns: any unresolved reference or `getattr(x, "name")` whose name matches a changed symbol;
     unparseable files.
-- `app/cli.py` — `pipeline(repo, base, head)` + `behavior-review --base --head --json`.
-- `contracts/report_scenario1.json` — fixture for C and D (validated by `tests/test_contracts.py`).
+- `app/cli.py` — the single engine entry: `pipeline(repo, base, head, max_hops, run=False)`.
+  With `run` (CLI `--run`) it also calls B's `runner.compare(pair, impact=impact)` inside the same
+  `open_pair` block and fills `tests`, `comparisons`, `needs_bob_action` and honest limits.
+- `contracts/report_scenario1.json` — generated from a real `--run` of `origin/base` vs
+  `origin/scenario1-head`, then labeled `"fixture": true` with one example `unintended` decision.
+  Validated by `tests/test_contracts.py`.
 
 ## Checks run
-`pytest -q` → 15 passed (assigned-name caller, ambiguous module → unknown, scenario 1 caller outside diff, 2 hops, max-hops bound, constant change,
-relative import + callback, unknowns, syntax error, add/remove/signature, docstring-only, snapshot
-isolation, bad revision error, CLI report has no local paths).
-Manual: CLI on a throwaway repo with the scenario 1 change printed `price_total → apply_discount`
-(invoice.py:5) and `checkout → price_total → apply_discount` as callers outside the diff.
+`pytest -q` → 37 passed, 1 failed on Windows only (B's `test_needs_bob_action_when_a_caller_has_no_probe`
+creates a branch named `head`, which collides with `HEAD` on a case-insensitive filesystem; passes on Linux).
+`behavior-review --base origin/base --head origin/scenario<N>-head --run` on Windows:
+scenario 1 suite 6/6 green both sides, both probes `delta_observed` 100.0 → 99.99, caller
+`price_total → apply_discount` (invoice.py:25) outside the diff; scenario 3 `same_on_tested_cases`;
+scenario 4 `inconclusive`.
 
 ## Next
-- Sync 1: call B's `runner.compare(pair, bundle)` inside `pipeline`'s `with open_pair(...)` block;
-  fill `tests`, `comparisons`, `needs_bob_action`; drop the "no tests or probes executed" limit when they ran.
-- Run on B's real `sample_project/` scenario branches once they exist.
-- Confirm with B/D: exact sample functions (§15.5) — fixture assumes `apply_discount(prices, pct)` and
-  `price_total(prices, pct)`.
+- `--format markdown` once C's `report.render` exists, so the Action posts C's rendering instead of its inline JS.
+- Sync 2: merge and tag a demo-ready commit.
 
 ## Blockers
-None.
+- No push access to `webdev-testa/pocbobbin` yet; PRs go through the `kafiirgie` fork.

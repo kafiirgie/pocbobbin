@@ -9,7 +9,8 @@ works both in this repo and in any clone.
 import json
 from pathlib import Path
 
-from app.runner import compare, pipeline
+from app.cli import pipeline
+from app.runner import compare
 from app.schemas import Outcome, RunStatus
 from app.snapshot import open_pair
 
@@ -66,7 +67,7 @@ def test_broken_setup_is_inconclusive_never_a_bug():
 
 
 def test_pipeline_populates_the_shared_report():
-    report = pipeline(REPO, BASE, HEAD)
+    report = pipeline(REPO, BASE, HEAD, run=True)
     assert report.fixture is False
     assert report.repo.endswith("pocbobbin")
     assert len(report.tests) == 2 and len(report.comparisons) == 2
@@ -76,14 +77,14 @@ def test_pipeline_populates_the_shared_report():
 
 
 def test_report_contains_no_local_paths():
-    report = pipeline(REPO, BASE, HEAD)
+    report = pipeline(REPO, BASE, HEAD, run=True)
     text = report.model_dump_json()
     assert str(REPO) not in text
     assert "/tmp/" not in text
 
 
 def test_impact_finds_the_caller_outside_the_diff():
-    report = pipeline(REPO, BASE, HEAD)
+    report = pipeline(REPO, BASE, HEAD, run=True)
     outside = [p for p in report.impact.paths if p.outside_diff and not p.is_test]
     assert [p.hops[0].symbol for p in outside] == ["price_total"]
     assert outside[0].hops[0].path == "sample_project/pricing/invoice.py"
@@ -115,7 +116,7 @@ def test_impact_graph_traverses_into_added_helpers():
 def test_summary_counts_each_caller_site_once():
     from app.cli import _summary
 
-    report = pipeline(REPO, BASE, S3)
+    report = pipeline(REPO, BASE, S3, run=True)
     summary = _summary(report)
     assert "1 non-test callers outside the diff" in summary
     assert "3 non-test callers outside the diff" not in summary
