@@ -2,7 +2,7 @@
 
 **Owner:** Lane D  
 **Branch:** `main`  
-**Status:** Complete & Fully Wired with Lane A & Lane B (39/39 pytest passing)  
+**Status:** Complete & Fully Wired with Lane A & Lane B (57/57 pytest passing on main)  
 **Last Updated:** 2026-09-26  
 
 ---
@@ -48,11 +48,10 @@
 # Full test suite across Lane A, Lane B, and Lane D
 python -m pytest -q
 # Output:
-# .......................................                                  [100%]
-# 39 passed in 30.90s
+# 57 passed
 
 # Live end-to-end execution with paired execution and prior decision citation
-python -m app.cli --base origin/base --head origin/scenario1-head --run
+python -m app.cli --base ref/base --head origin/scenario1-head --run
 # Output includes:
 # - Tests: 6 passed on base, 6 passed on head
 # - Comparisons: price_total_boundary delta_observed (100.0 -> 99.99)

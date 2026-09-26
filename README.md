@@ -1,7 +1,18 @@
 # behavior-review
 
-Finds what a change could affect, including callers in files outside the diff, before a PR is
-opened. See `FINAL_PLAN.md` for the full design.
+Green tests and a clean diff can still hide a broken caller. `behavior-review` compares two
+commits and answers, with real execution evidence rather than AI opinion:
+
+1. **What else could this change affect?** An AST impact graph finds callers up to 2 hops away,
+   including callers in files the diff never touched.
+2. **Did behavior actually change?** The base revision's test suite and the committed probes run
+   with identical bytes on both revisions, and their outputs are compared.
+3. **Was the change intended?** Each difference gets a human disposition; intended ones are recorded
+   in a decision ledger and cited by later reviews.
+
+> AI proposes. Algorithms verify. Humans decide.
+
+See `FINAL_PLAN.md` for the full design.
 
 ## Install
 
@@ -33,26 +44,47 @@ uncommitted edits are not analyzed, and your working tree, index and current bra
 touched (each revision is checked out into a temporary `git worktree`).
 
 ```bash
-# Review your branch against main, write the report, print a summary
+# Impact only: what changed and who calls it
 behavior-review --base main --head HEAD --json report.json
 
-# Any two commits, branches or tags work
-behavior-review --base v1.2 --head my-feature --json report.json
-
-# Review a repository in another folder
-behavior-review --repo ../other-repo --base main --head HEAD --json report.json
+# Plus paired execution: run the frozen tests and committed probes on both revisions
+behavior-review --base main --head HEAD --run --json report.json --markdown report.md
 ```
 
-With `--json`, the report is written to that file and a summary is printed. Callers outside the
-diff are listed first:
+With `--json` or `--markdown`, the files are written and a summary is printed. Without either,
+the full report is printed to stdout as JSON.
+
+### Try it on the demo scenarios
+
+The sample package in `sample_project/` has one "before" revision (the `ref/base` tag) and one
+"after" branch per scenario:
+
+```bash
+behavior-review --base ref/base --head origin/scenario1-head --run --json report.json
+```
 
 ```
-aa5bc83..630152b: 1 changed symbols, 3 impact paths, 2 non-test callers outside the diff, 0 unknowns
-  outside diff: price_total → apply_discount  (sample_project/pricing/invoice.py:5)
-  outside diff: checkout → price_total → apply_discount  (sample_project/pricing/checkout.py:5)
+1cb1511..13ffdbb: 2 changed symbols, 5 impact paths, 1 non-test callers outside the diff, 0 unknowns
+  outside diff: price_total → apply_discount  (sample_project/pricing/invoice.py:25)
+  tests on base: ok (6 passed, 0 failed, 0 errors)
+  tests on head: ok (6 passed, 0 failed, 0 errors)
+  probe apply_discount_contract: delta_observed  100.0 -> 99.99
+  probe apply_discount_policy_cap: same_on_tested_cases  60.0 -> 60.0
+  probe price_total_boundary: delta_observed  100.0 -> 99.99
+  prior decision 951cc25e49ee (approved) on sample_project/pricing/discount.py::apply_discount: intended — Business policy update: maximum allowable discount capped at 30% per Q3 pricing review.
 ```
 
-Without `--json`, the full report is printed to stdout as JSON.
+The existing tests stay green on both sides, yet `price_total` in `invoice.py`, a file the diff never
+touched, returns a different number for the same input.
+
+| Head | Scenario | Expected result |
+|---|---|---|
+| `origin/scenario1-head` | Rounding "cleanup" breaks a caller in another file | Tests green, `delta_observed` on `price_total` |
+| `origin/scenario2-head` | Intentional policy change (max discount 50% → 30%) | `delta_observed`, cites the approved decision |
+| `origin/scenario3-head` | Behavior-preserving refactor | `same_on_tested_cases` |
+| `origin/scenario4-head` | Broken setup | `inconclusive`, never "bug" |
+
+### Options
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -60,16 +92,59 @@ Without `--json`, the full report is printed to stdout as JSON.
 | `--head` | `HEAD` | Revision after the change |
 | `--repo` | `.` | Any path inside the git repository |
 | `--max-hops` | `2` | How many caller levels to trace back from each changed symbol |
-| `--json PATH` | stdout | Where to write the report |
+| `--run` | off | Also run the frozen base test suite and `probes/*.json` on both revisions |
+| `--prior-report PATH` | — | An earlier `report.json`: a probe that showed a delta there and shows none now is linked to it (`reruns`), but only if the probe bytes are unchanged |
+| `--json PATH` | stdout | Where to write the report JSON |
+| `--markdown PATH` | — | Also write the report as Markdown (the PR comment body) |
 
 Exit code is `0` on success and `2` if a revision can't be resolved.
 
 The report's shape is defined in `app/schemas.py` (`ReviewReport`); `contracts/report_scenario1.json`
-is a labeled example. Anything the analysis can't resolve is listed under `impact.unknowns`, never
-treated as safe.
+is a labeled example.
 
-### Run the tests
+## In Bob IDE: `/behavior-review`
+
+`.bob/custom_modes.yaml` registers a **Behavior Review** custom mode. In it, Bob runs the CLI with
+`--run`, explains the evidence, writes a probe (in `probes/*.json`) for any impacted caller listed in
+`needs_bob_action`, and helps fix unintended changes by rerunning the **unchanged** probe. Bob never
+chooses the intent or writes a rationale for the author; for intended changes the author's rationale
+is recorded with `app.decisions.validate_and_save`.
+
+## On every PR: GitHub Action
+
+`.github/workflows/behavior-review.yml` runs on each pull request push: it runs the CLI with `--run`
+against the PR's base branch, uploads `report.json` as a build artifact, and creates or updates one PR
+comment with the evidence. It reuses committed probes and never calls Bob; if an impacted caller has
+no probe, the comment says so (`needs_bob_action`).
+
+## Decision ledger
+
+Intended behavior changes are stored as JSON in `behavior_decisions/`. A decision written on a PR
+branch is only proposed; it becomes approved when that PR is merged. Every later review lists
+matching decisions (same file path and symbol) under `prior_decisions`, including superseded ones,
+labeled as such. History informs a review; it never approves a new difference.
+
+## Web evidence viewer
+
+`web/` is a static React viewer for a report (impact paths, old vs new outputs, decisions). See
+`web/README.md` to run or deploy it. Decisions made there are session-only and approve nothing.
+
+## Limits
+
+- **Static impact.** Calls through variables, dynamic dispatch or class hierarchies may be missed;
+  unresolved references that could reach a changed symbol are listed as `unknowns`, never as safe.
+- **Bounded depth.** Callers are traced up to `--max-hops` levels.
+- **Tested cases only.** `same_on_tested_cases` means identical output for the frozen inputs, not
+  proof of equivalence for all inputs.
+- **Honest failures.** Setup errors, import errors and timeouts are `inconclusive`, never "bug".
+- **Scope.** Python only; the probe harness targets pure, deterministic functions.
+
+## Run the tests
 
 ```bash
 pytest -q
 ```
+
+## License
+
+MIT — see `LICENSE`.

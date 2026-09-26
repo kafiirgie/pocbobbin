@@ -7,8 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "npm run check:fixture",
-    "check:fixture": "node scripts/check-fixture.mjs",
+    "test": "npm run check:report",
+    "check:report": "node scripts/check-report.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -1,28 +1,11 @@
 # Lane B handoff — execution engine
 
-Owner: Wipiii (B). Working branch: `feat/execution-engine` (`efa88f4`), based on `origin/main` (`c0d9885`) with A's engine merged.
-Repo: `~/projects/pocbobbin` on wipiii-server. Every number below is real command output, no fixtures.
+Owner: Wipiii (B). Status: on `main` (PRs #3, #6, #7, #9, #14, #15, #16). Every number below
+is real command output, no fixtures.
 
-## Merged (PR #3)
-
-Pushed and verified with an SSH remote authenticated to the repo, e.g.:
-
-```bash
-git push git@github.com:webdev-testa/pocbobbin.git feat/execution-engine:feat/execution-engine
-git push git@github.com:webdev-testa/pocbobbin.git base:base scenario1-head:scenario1-head scenario3-head:scenario3-head scenario4-head:scenario4-head
-```
-
-Branch `feat/execution-engine` at `7240d4d`; scenario branches `base` `60d933a2`,
-`scenario1-head` `7b686d8c`, `scenario3-head` `f5054caf`, `scenario4-head` `f7a09999`.
-See `handoffs/scenario-refs.json` for the current SHAs.
-
-**The scenario branches must be public**, otherwise the PR is not runnable: the tests and
-the CLI resolve them as `origin/base`, `origin/scenario1-head` and so on. Verified on a fresh
-clone of the pushed branch: 27 passed, and the scenario 1 delta reproduces.
-
-Opening the PR needs a GitHub session (not available to the agent). One click:
-`https://github.com/webdev-testa/pocbobbin/compare/main...feat/execution-engine?expand=1`
-The prepared body is in `handoffs/pr-lane-b.md`.
+**The scenario revisions must stay public**: the tests and the CLI resolve them as `ref/base`
+(tag) and `origin/scenario<N>-head`. Current SHAs and recreate commands are in
+`handoffs/scenario-refs.json`.
 
 ## What works
 
@@ -33,13 +16,13 @@ scenario branches exist only as remote-tracking refs, so pass `origin/<name>`:
 python -m app.cli --repo . --base ref/base --head origin/scenario1-head --run
 ```
 
-In this checkout, where the branches also exist locally, `--base ref/base --head scenario1-head`
-works the same.
+`app/runner.py` implements A's contract `compare(pair, impact=..., prior_report=...) ->
+(tests, comparisons, needs_bob_action, notes)`; `app.cli.pipeline(..., run=True)` calls it
+and emits one `ReviewReport` with impact paths, frozen-suite results, probe comparisons and
+honest limits. `--run` opts into execution; the default CLI path stays impact-only.
 
-`app/runner.py` implements A's contract `compare(pair, bundle) -> (tests, comparisons,
-needs_bob_action)` plus `pipeline()`, so the CLI emits one `ReviewReport` with impact
-paths, frozen-suite results, probe comparisons and honest limits. `--run` opts into
-execution; the default CLI path stays impact-only, as A built it.
+Rerun linking (#16): pass an earlier report with `--prior-report`; a probe that showed a delta
+there and none now gets `reruns: <probe id>`, but only if the probe bytes (hash) are unchanged.
 
 Order of operations (plan P0.1 to P0.5): worktree both revisions, freeze the BASE test
 suite and the probe runner, run those identical bytes on both sides, run identical probe
@@ -72,11 +55,12 @@ rejected under the new one), which is what P1.2 and Scenario 5 depend on.
 `sample_project/pricing/invoice.py::price_total` and adds the limit "1 impacted non-test
 caller(s) outside the diff have no committed probe".
 
-Tests: **40 passed** on a fresh clone, including a regression test that fails if scenario 2
-stops producing a delta.
+Tests: **57 passed** (whole suite, verified on Windows), including a regression test that fails
+if scenario 2 stops producing a delta and one that fails if a fixed rerun isn't linked.
 
-SHAs: `base` `1cb1511`; `scenario1-head` `13ffdbb`; `scenario2-head`; `scenario3-head` `665ca80`;
-`scenario4-head` `27132d8`. Each scenario-head diff vs `base` is exactly one file.
+SHAs: `ref/base` `1cb1511`; `scenario1-head` `13ffdbb`; `scenario2-head` `9199353`;
+`scenario3-head` `665ca80`; `scenario4-head` `27132d8`. Each scenario-head diff vs `ref/base`
+is exactly one file.
 
 ## Probe format (contract for D's Bob mode and the Action)
 
@@ -124,9 +108,8 @@ the diff**; that caller path is what lane A's impact graph must surface.
 
 ## Blockers
 
-- **Push access** (above): needs a token, collaborator rights, or Wipiii pushes.
-- Scenario 2 (intended change plus rationale) and Scenario 5 (lookup cites the approved
-  decision) are lane D. B supplies the probes and runner for both.
+None. Scenario 2's approved decision (`behavior_decisions/951cc25e49ee.json`) is on `main`,
+and Scenario 1 cites it, which covers Scenario 5.
 
 ## Not done / limits (say so honestly)
 

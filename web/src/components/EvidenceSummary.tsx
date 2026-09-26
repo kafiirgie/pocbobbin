@@ -29,7 +29,7 @@ export function EvidenceSummary({ report }: EvidenceSummaryProps) {
   const callerCount = new Set(
     report.impactPaths
       .flatMap((path) => path.nodes)
-      .filter((node) => node.outsideDiff)
+      .filter((node) => node.outsideDiff && node.role !== "test caller")
       .map((node) => `${node.path ?? ""}:${node.symbol}:${node.line ?? ""}`),
   ).size;
 
