@@ -1,0 +1,18 @@
+{
+  "id": "951cc25e49ee",
+  "repo": "webdev-testa/pocbobbin",
+  "target": {
+    "path": "sample_project/pricing/discount.py",
+    "symbol": "apply_discount"
+  },
+  "base_sha": "1cb1511c4eb3f3c1b955cb9b97c24033d8be15d0",
+  "head_sha": "91993531872945007438c1b9f026717d9da6910f",
+  "probe_hash": "sha256:1a4c3ef89d3f5cdb",
+  "before": 60.0,
+  "after": "ValueError: discount_pct out of range",
+  "intent": "intended",
+  "rationale": "Business policy update: maximum allowable discount capped at 30% per Q3 pricing review.",
+  "requirement_ref": "PRICE-2026-Q3",
+  "status": "approved",
+  "supersedes": null
+}

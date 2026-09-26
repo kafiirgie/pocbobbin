@@ -1,5 +1,9 @@
 # Review of lane A — analysis engine (PR #1, merged as c0d9885)
 
+**Status: resolved.** Both follow-ups are done: the Sync 1 wiring is `app.cli.pipeline(..., run=True)`
+(PR #4), and `contracts/report_scenario1.json` was regenerated from a real run of the real sample
+signatures. Kept as a record of the review.
+
 Reviewer: Wipiii (lane B). Method: read the code, then ran it against B's real
 scenario branches, not against A's fixtures.
 

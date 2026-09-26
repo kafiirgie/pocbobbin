@@ -1,36 +1,58 @@
 # AGENTS.md
 
-Behavior review before and after a PR. Full plan: `FINAL_PLAN.md` (§8 scope, §10 lanes).
+Behavior review before and after a PR. `FINAL_PLAN.md` is authoritative (§8 scope, §10 lanes).
+Work on a short-lived branch off `main` and merge through a PR.
 
-## Rules
-- AI proposes, algorithms verify, humans decide. Only real process output counts as a result.
-- Unknown edge ≠ no impact. Setup/import error, timeout, nondeterminism → `inconclusive`, never "bug".
-- Never edit a probe to make a difference disappear. Fixes rerun the unchanged probe.
-- Edit only your lane's files. Schema changes go through A (`app/schemas.py` + `contracts/` in one commit).
-- Fixtures carry `"fixture": true` and never appear in the final demo.
-- No local paths (`C:/Users/...`) in anything published — reports carry repo-relative paths only.
+## Non-negotiable rules
+
+- AI proposes, algorithms verify, humans decide. Only real process output counts as evidence.
+- Unknown edge is not no impact: show it as unknown, never as safe.
+- Setup/import error, timeout or nondeterminism is `inconclusive`, never a bug.
+- Never edit a probe to make a difference disappear; fixes rerun the unchanged probe.
+- Bob never picks intent or writes a rationale the author didn't confirm.
+- Fixtures carry `"fixture": true` and never appear as final demo evidence.
+- Do not publish local absolute paths (`C:/Users/...`, `/home/...`) or secrets.
+- Shared schema changes go through A (`app/schemas.py` + `contracts/` in one commit).
 
 ## Contracts (`app/schemas.py`)
+
 | Function | Input → Output | Owner |
 |---|---|---|
-| `snapshot.open_pair` / `resolve_pair` | repo, base, head → `RevisionPair` (detached worktrees; `pair.revisions` has SHAs + changed files) | A |
-| `impact.analyze` | `RevisionPair` → `ImpactResult` (changed symbols, edges, paths, unknowns) | A |
-| `runner.compare` | `RevisionPair`, `impact=` → `SuiteRun`s, `Comparison`s, `needs_bob_action`, notes (called by `cli.pipeline(run=True)`) | B |
-| `decisions.validate_and_save` | delta, disposition, rationale → `Decision` or error | D |
-| `decisions.lookup` | approved records, symbols → matches / stale | D |
-| `report.render` | `ReviewReport` → Markdown, web data | C |
+| `cli.pipeline(repo, base, head, max_hops, run, prior_report)` | → `ReviewReport`; every door calls this | A |
+| `snapshot.open_pair(repo, base, head)` | → `RevisionPair` (detached worktrees; `pair.revisions` has SHAs + changed files) | A |
+| `impact.analyze(pair, max_hops)` | → `ImpactResult` (changed symbols, edges, paths, unknowns) | A |
+| `runner.compare(pair, impact=..., prior_report=...)` | → `SuiteRun`s, `Comparison`s (with `reruns`), `needs_bob_action`, notes | B |
+| `decisions.validate_and_save` / `lookup` | delta + disposition → `Decision`; symbols → prior matches | D |
+| `report.render_markdown` / `to_web_data` | `ReviewReport` → Markdown (PR comment) / web data | C |
 
-Example of the finished output: `contracts/report_scenario1.json`.
+A real report looks like `contracts/report_scenario1.json` (generated from a `--run`, labeled fixture).
 
 ## Ownership
-- A: `app/schemas.py snapshot.py impact.py cli.py`, `pyproject.toml`, `contracts/`, `tests/` (engine tests)
-- B: `app/runner.py`, `probes/`, `sample_project/`
+
+- A: `app/schemas.py`, `app/snapshot.py`, `app/impact.py`, `app/cli.py`, `pyproject.toml`, `contracts/`
+- B: `app/runner.py`, `probes/`, `sample_project/`, `tools/`, scenario branches (`handoffs/scenario-refs.json`)
 - C: `app/report.py`, `web/`
 - D: `app/decisions.py`, `behavior_decisions/`, `.bob/`, `.github/workflows/`
 
+Each lane keeps `handoffs/<lane>.md` current (about one page).
+
 ## Commands
-```
-python -m venv .venv && .venv/Scripts/pip install -e ".[dev]"   # Linux/macOS: .venv/bin/pip
-behavior-review --base main --head HEAD --json report.json
+
+```bash
+python -m venv .venv                       # then activate it
+pip install -e ".[dev]"
 pytest -q
+behavior-review --base main --head HEAD --run --json report.json --markdown report.md
+behavior-review --base ref/base --head origin/scenario1-head --run --json report.json   # demo
 ```
+
+Web viewer (from `web/`): `npm install`, `npm run dev`, `npm run typecheck`, `npm run build`.
+Vercel: root `web`, build `npm run build`, output `dist`.
+
+## Web viewer direction (C)
+
+A restrained IBM/Carbon-informed evidence dossier: neutral surfaces with one primary blue accent;
+clear hierarchy for evidence, paths, hashes and outputs; no fake terminal or dashboard screenshots;
+responsive, accessible contrast, visible focus, light/dark and reduced-motion support. It shows run
+metadata, changed symbols, impact paths, unknowns, probe inputs, base/head outputs, outcomes, human
+dispositions, limits and Action/artifact links. Visitor decisions are session-only, never approvals.

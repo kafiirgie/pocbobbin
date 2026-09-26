@@ -38,6 +38,7 @@ try:  # pragma: no cover - exercised by whichever entry point runs first
         Outcome,
         Probe,
         ProbeBundle,
+        ReviewReport,
         Revision,
         RunStatus,
         SuiteRun,
@@ -446,7 +447,8 @@ def _canon(value) -> str:
 
 
 def compare(pair, bundle=None, python: str | None = None, probes_dir: str = PROBES_DIR,
-            tests_rel: str = TESTS_DIR, impact=None, config: BehaviorConfig | None = None):
+            tests_rel: str = TESTS_DIR, impact=None, config: BehaviorConfig | None = None,
+            prior_report=None):
     """A's contract: RevisionPair + ProbeBundle -> (suite runs, comparisons, needs_bob_action).
 
     `bundle` is accepted for A's signature; the probes actually executed are the
@@ -455,6 +457,12 @@ def compare(pair, bundle=None, python: str | None = None, probes_dir: str = PROB
     Sources: the frozen test suite always comes from BASE. The probe runner and the
     probe files come from BASE when they exist there, else from HEAD (a PR that adds
     the harness itself), and the report says which revision supplied them.
+
+    `prior_report` is an earlier ReviewReport (a dict or a path to one). When a probe
+    that showed a delta then shows no delta now, the new comparison is linked to that
+    earlier delta via `Comparison.reruns`: same probe, fixed code (plan section 5 rule 4
+    and scenario 1). Rerun linking only ever applies to the *unchanged* probe id; a probe
+    whose recorded hash differs is a different probe and is not linked.
     """
     python = python or sys.executable
     settings = config or load_config(pair.root)
@@ -462,6 +470,7 @@ def compare(pair, bundle=None, python: str | None = None, probes_dir: str = PROB
         tests_rel = settings.tests_dir
     base_wt, head_wt = Path(pair.base_path), Path(pair.head_path)
     notes: list[str] = []
+    prior_deltas = _prior_delta_probes(prior_report)
 
     def source_of(rel: str) -> Path:
         """BASE is authoritative; fall back to HEAD and record why."""
@@ -504,8 +513,24 @@ def compare(pair, bundle=None, python: str | None = None, probes_dir: str = PROB
             b = run_probe_configured(base_wt, settings.probe_runner, frozen_runner, probe_file, python)
             h = run_probe_configured(head_wt, settings.probe_runner, frozen_runner, probe_file, python)
             outcome = classify(b, h)
+            probe_hash = "sha256:" + _sha8(probe_file.read_text())
+            reruns = None
+            if outcome == Outcome.SAME_ON_TESTED_CASES and spec["id"] in prior_deltas:
+                # same probe, now clean: link it to the earlier delta it resolves.
+                # The hash guard keeps this honest: only the unchanged probe counts.
+                if prior_deltas[spec["id"]] == probe_hash:
+                    reruns = spec["id"]
+                    notes.append(
+                        f"probe '{spec['id']}' now reports {outcome} against the earlier "
+                        f"delta it resolves (same probe bytes, hash {probe_hash})."
+                    )
+                else:
+                    notes.append(
+                        f"probe '{spec['id']}' changed bytes since the earlier delta, so this run "
+                        "is NOT linked to it: a rerun must use the unchanged probe."
+                    )
             comparisons.append(
-                _comparison(probe_file, spec, pair, b, h, outcome, settings)
+                _comparison(probe_file, spec, pair, b, h, outcome, settings, reruns=reruns)
             )
             target_path, target_symbol = _target_ref(spec, settings)
             probed.add((target_path, target_symbol))
@@ -534,15 +559,50 @@ def _target_ref(spec: dict, config: BehaviorConfig) -> tuple[str, str]:
         "c": ".c",
         "rust": ".rs",
         "php": ".php",
+        "kotlin": ".kt",
+        "ruby": ".rb",
+        "swift": ".swift",
+        "dart": ".dart",
+        "bash": ".sh",
     }.get(config.language, config.extensions[0])
     return path.replace(".", "/") + language_extension, symbol
 
 
-def _comparison(probe_file: Path, spec: dict, pair, b, h, outcome, config: BehaviorConfig | None = None):
+def _prior_delta_probes(prior_report) -> dict[str, str]:
+    """probe id -> probe hash, for every probe that showed a delta in an earlier report.
+
+    Accepts a ReviewReport, a plain dict, or a path to a report JSON. Unknown shapes
+    yield an empty mapping rather than an error: rerun linking is an enhancement, and a
+    malformed history must not turn a normal run into a failure.
+    """
+    if prior_report is None:
+        return {}
+    if isinstance(prior_report, (str, Path)):
+        try:
+            prior_report = json.loads(Path(prior_report).read_text(encoding="utf-8"))
+        except (OSError, ValueError):  # ValueError covers bad JSON and undecodable bytes
+            return {}
+    if HAS_SCHEMA and isinstance(prior_report, ReviewReport):  # noqa: F821 - guarded by HAS_SCHEMA
+        prior_report = json.loads(prior_report.model_dump_json())
+    if not isinstance(prior_report, dict):
+        return {}
+    deltas: dict[str, str] = {}
+    for comp in prior_report.get("comparisons") or []:
+        if not isinstance(comp, dict) or comp.get("outcome") != Outcome.DELTA_OBSERVED.value:
+            continue
+        probe = comp.get("probe") or {}
+        probe_id = probe.get("id")
+        if probe_id:
+            deltas[probe_id] = probe.get("hash") or ""
+    return deltas
+
+
+def _comparison(probe_file: Path, spec: dict, pair, b, h, outcome,
+                config: BehaviorConfig | None = None, reruns: str | None = None):
     b_status, b_out, b_exc, b_ms = b
     h_status, h_out, h_exc, h_ms = h
     if not HAS_SCHEMA:
-        return dict(probe=spec["id"], outcome=str(outcome), base=b_out, head=h_out)
+        return dict(probe=spec["id"], outcome=str(outcome), base=b_out, head=h_out, reruns=reruns)
     settings = config or BehaviorConfig()
     target_path, target_symbol = _target_ref(spec, settings)
     return Comparison(
@@ -559,6 +619,7 @@ def _comparison(probe_file: Path, spec: dict, pair, b, h, outcome, config: Behav
                          output=h_out, exception=h_exc, duration_ms=h_ms),
         outcome=Outcome(outcome),
         ran_at=datetime.now(timezone.utc),
+        reruns=reruns,
     )
 
 

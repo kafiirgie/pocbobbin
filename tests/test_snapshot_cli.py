@@ -74,3 +74,27 @@ def test_prior_decisions_match_path_and_symbol_and_flag_superseded(make_repo, ca
     }
     assert main(["--repo", str(repo), "--base", "base", "--head", "head", "--json", str(repo / "r.json")]) == 0
     assert "prior decision d1 (approved) on pkg/core.py::f: intended — policy change" in capsys.readouterr().out
+
+def test_cli_writes_markdown_report(make_repo, tmp_path, capsys):
+    repo = make_repo(FILES, CHANGE)
+    md = tmp_path / "report.md"
+
+    assert main(["--repo", str(repo), "--base", "base", "--head", "head", "--markdown", str(md)]) == 0
+
+    text = md.read_text(encoding="utf-8")
+    assert text.startswith("## Behavior Review")
+    assert "pkg/core.py" in text and tmp_path.as_posix() not in text
+    assert "g → f" in capsys.readouterr().out
+
+def test_cli_records_links_in_json_and_markdown(make_repo, tmp_path):
+    repo = make_repo(FILES, CHANGE)
+    out, md = tmp_path / "report.json", tmp_path / "report.md"
+    url = "https://github.com/owner/repo/actions/runs/123"
+
+    args = ["--repo", str(repo), "--base", "base", "--head", "head", "--json", str(out), "--markdown", str(md)]
+    assert main([*args, "--link", f"action_run={url}"]) == 0
+
+    assert json.loads(out.read_text(encoding="utf-8"))["links"] == {"action_run": url}
+    assert url in md.read_text(encoding="utf-8")
+    with pytest.raises(SystemExit):
+        main([*args, "--link", "not-a-link"])

@@ -191,6 +191,25 @@ def _walk(nodes: list[ast.AST]) -> Iterator[ast.AST]:
         yield from ast.walk(node)
 
 
+def _local_names(nodes: list[ast.AST]) -> set[str]:
+    """Parameters and assigned names of a function scope: a load of one never refers to a module symbol.
+
+    Nested functions are folded into their outer function, so a name local only to the inner one is
+    treated as local here too — accepted to keep scopes one level deep.
+    """
+    if len(nodes) != 1 or not isinstance(nodes[0], (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return set()
+    args = nodes[0].args
+    names = {a.arg for a in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg] if a}
+    declared_outer: set[str] = set()
+    for node in ast.walk(nodes[0]):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            names.add(node.id)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            declared_outer.update(node.names)
+    return names - declared_outer
+
+
 def _terminal_name(expr: ast.Name | ast.Attribute) -> str:
     return expr.id if isinstance(expr, ast.Name) else expr.attr
 
@@ -258,7 +277,10 @@ class Codebase:
 
     def _references(self, module: Module, cls: str | None, nodes: list[ast.AST]) -> Iterator[tuple[ast.AST, SymbolRef | None, str, str]]:
         """(node, resolved target or None, referenced name, reason if unresolved) for every symbol-like load."""
+        local = _local_names(nodes)
         for node in _walk(nodes):
+            if isinstance(node, ast.Name) and node.id in local:
+                continue
             if isinstance(node, (ast.Name, ast.Attribute)) and isinstance(node.ctx, ast.Load):
                 yield node, self.resolve(module, node, cls), _terminal_name(node), "unresolved reference"
             elif name := _getattr_literal(node):

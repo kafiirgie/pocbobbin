@@ -15,7 +15,7 @@ from app.schemas import Outcome, RunStatus
 from app.snapshot import open_pair
 
 REPO = Path(__file__).resolve().parents[1]
-BASE, HEAD = "origin/base", "origin/scenario1-head"
+BASE, HEAD = "ref/base", "origin/scenario1-head"
 S3, S4 = "origin/scenario3-head", "origin/scenario4-head"
 
 
@@ -139,13 +139,13 @@ def test_compare_survives_a_base_without_the_harness(tmp_path):
     run = lambda *args: subprocess.run(["git", "-C", str(repo), *args], check=True, env=env)
     run("init", "-q")
     # base: the package, with the tests and the demo caller, but no tools/ and no probes/
-    run("fetch", "-q", str(REPO), "refs/remotes/origin/base:refs/heads/base")
+    run("fetch", "-q", str(REPO), "refs/tags/ref/base:refs/heads/base")
     run("checkout", "-q", "base")
     run("rm", "-r", "-q", "tools", "probes")
     run("commit", "-qm", "base without the harness")
     # head: the harness added by the PR
-    run("fetch", "-q", str(REPO), "refs/remotes/origin/scenario1-head:refs/heads/head")
-    run("checkout", "-q", "head")
+    run("fetch", "-q", str(REPO), "refs/remotes/origin/scenario1-head:refs/heads/changed")
+    run("checkout", "-q", "changed")
 
     with open_pair(repo, "base", "HEAD") as pair:
         suites, comparisons, _, notes = compare(pair)
@@ -176,6 +176,65 @@ def test_scenario2_policy_change_produces_a_delta():
     assert by_id["price_total_boundary"].outcome == Outcome.SAME_ON_TESTED_CASES
 
 
+def test_rerun_links_to_the_earlier_delta():
+    """Scenario 1 requirement 5: fix, rerun the SAME probe, link it to the original delta.
+
+    Without this the report cannot show the demo's closing beat: "the delta was unintended,
+    it is now fixed, and here is the link back to the delta it resolved".
+    """
+    from app.cli import pipeline
+
+    # first pass: the changed head shows a delta
+    before = pipeline(REPO, BASE, "origin/scenario1-head", run=True)
+    deltas = {c.probe.id for c in before.comparisons if c.outcome == Outcome.DELTA_OBSERVED}
+    assert {"apply_discount_contract", "price_total_boundary"} <= deltas
+
+    # second pass on an unchanged head: no delta, so nothing is linked
+    after = pipeline(REPO, BASE, "origin/scenario1-head", run=True, prior_report=before)
+    for comp in after.comparisons:
+        if comp.outcome == Outcome.SAME_ON_TESTED_CASES:
+            assert comp.reruns is None, "nothing to resolve when the probe still reports the same"
+    # the probes that DO still show a delta keep their delta, and are not relabelled
+    assert {c.probe.id for c in after.comparisons if c.outcome == Outcome.DELTA_OBSERVED} == deltas
+
+    # third pass on fixed code (the base behavior restored): each earlier delta is linked,
+    # and a probe that never showed a delta is not
+    fixed = pipeline(REPO, BASE, BASE, run=True, prior_report=before)
+    linked = {c.probe.id: c.reruns for c in fixed.comparisons}
+    assert all(linked[probe_id] == probe_id for probe_id in deltas)
+    assert all(linked[probe_id] is None for probe_id in linked.keys() - deltas)
+
+
+def test_rerun_requires_the_unchanged_probe(tmp_path):
+    """Plan section 5 rule 4: a fix reruns the UNCHANGED probe.
+
+    If the probe bytes changed, the earlier delta was resolved by editing the probe, not the
+    code, so the run must NOT be linked to it.
+    """
+    from app.runner import _prior_delta_probes
+
+    prior = {"comparisons": [
+        {"probe": {"id": "price_total_boundary", "hash": "sha256:ORIGINAL"}, "outcome": "delta_observed"},
+        {"probe": {"id": "quiet_probe", "hash": "sha256:X"}, "outcome": "same_on_tested_cases"},
+    ]}
+    deltas = _prior_delta_probes(prior)
+    # only probes that actually showed a delta are candidates
+    assert deltas == {"price_total_boundary": "sha256:ORIGINAL"}
+    # and a changed hash cannot match the recorded one, so no link is possible
+    from app.runner import _sha8
+    assert "sha256:" + _sha8("edited probe bytes") != deltas["price_total_boundary"]
+
+
+def test_prior_report_tolerates_junk():
+    """Rerun linking is an enhancement; bad history must never break a normal run."""
+    from app.runner import _prior_delta_probes
+
+    assert _prior_delta_probes(None) == {}
+    assert _prior_delta_probes("/no/such/file.json") == {}
+    assert _prior_delta_probes({"comparisons": "not-a-list"}) == {}
+    assert _prior_delta_probes("not-a-dict") == {}
+
+
 def test_needs_bob_action_when_a_caller_has_no_probe(tmp_path):
     """Dropping the caller's probe must surface it as needing Bob, not as safe.
 
@@ -191,13 +250,14 @@ def test_needs_bob_action_when_a_caller_has_no_probe(tmp_path):
            "PATH": "/usr/bin:/bin:/usr/local/bin", "HOME": str(tmp_path)}
     run = lambda *args: subprocess.run(["git", "-C", str(repo), *args], check=True, env=env)
     run("init", "-q")
-    run("fetch", "-q", str(REPO), "refs/remotes/origin/base:refs/heads/noprobe")
-    run("fetch", "-q", str(REPO), "refs/remotes/origin/scenario1-head:refs/heads/head")
+    run("fetch", "-q", str(REPO), "refs/tags/ref/base:refs/heads/noprobe")
+    # not "head": a branch of that name collides with HEAD on case-insensitive filesystems (Windows)
+    run("fetch", "-q", str(REPO), "refs/remotes/origin/scenario1-head:refs/heads/changed")
     run("checkout", "-q", "noprobe")
     (repo / "probes" / "price_total_boundary.json").unlink()
     run("commit", "-qam", "drop caller probe")
 
-    with open_pair(repo, "noprobe", "head") as pair:
+    with open_pair(repo, "noprobe", "changed") as pair:
         _, comparisons, missing, _ = compare(pair)
     # the caller probe is gone; the other committed probes still run
     assert [c.probe.id for c in comparisons] == [

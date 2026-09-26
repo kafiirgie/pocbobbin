@@ -13,6 +13,7 @@ from pathlib import Path
 from app.config import ConfigError, load_config
 from app.decisions import lookup
 from app.impact import analyze
+from app.report import render_markdown
 from app.runner import compare
 from app.schemas import Decision, DecisionStatus, ImpactResult, ReviewReport, RevisionPair, SymbolRef
 from app.snapshot import SnapshotError, open_pair
@@ -54,14 +55,22 @@ def _prior_decisions(pair: RevisionPair, impact: ImpactResult) -> list[Decision]
     ]
 
 
-def pipeline(repo: str | Path, base: str, head: str, max_hops: int | None = None, run: bool = False) -> ReviewReport:
-    """Snapshot → impact → prior decisions → (with `run`) paired execution of the frozen suite and probes."""
+def pipeline(repo: str | Path, base: str, head: str, max_hops: int | None = None, run: bool = False,
+             prior_report: str | Path | None = None) -> ReviewReport:
+    """Snapshot → impact → prior decisions → (with `run`) paired execution of the frozen suite and probes.
+
+    Pass `prior_report` (a path to an earlier report.json) to link a probe that showed a
+    delta and now reports no delta to that earlier delta, via `Comparison.reruns`.
+    """
     with open_pair(repo, base, head) as pair:
         config = load_config(pair.root)
         effective_hops = config.max_hops if max_hops is None else max_hops
         impact = analyze(pair, effective_hops, config)
         prior = _prior_decisions(pair, impact)
-        suites, comparisons, missing, notes = compare(pair, impact=impact, config=config) if run else ([], [], [], [])
+        suites, comparisons, missing, notes = (
+            compare(pair, impact=impact, config=config, prior_report=prior_report)
+            if run else ([], [], [], [])
+        )
     return ReviewReport(
         repo=pair.repo,
         revisions=pair.revisions,
@@ -120,7 +129,14 @@ def _render(value) -> str:
     return json.dumps(value, sort_keys=True) if not isinstance(value, str) else value
 
 
-def main(argv: list[str] | None = None) -> int:
+def _link(value: str) -> tuple[str, str]:
+    name, sep, url = value.partition("=")
+    if not (sep and name and url.startswith(("https://", "http://"))):
+        raise argparse.ArgumentTypeError(f"expected NAME=URL, got {value!r}")
+    return name, url
+
+
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="behavior-review",
         description="Find what a change between two commits could affect, including callers outside the diff.",
@@ -130,27 +146,49 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--head", default="HEAD", help="Head revision (default: HEAD)")
     parser.add_argument("--max-hops", type=int, default=None, help="Caller levels to trace back (default: behavior.json or 2)")
     parser.add_argument("--json", type=Path, help="Write the ReviewReport JSON here instead of stdout")
+    parser.add_argument("--markdown", type=Path, help="Also write the report as Markdown (the PR comment body) here")
     parser.add_argument(
         "--run",
         action="store_true",
         help="Also run the frozen test suite and committed probes on both revisions (paired execution).",
     )
-    args = parser.parse_args(argv)
+    parser.add_argument(
+        "--prior-report",
+        type=Path,
+        default=None,
+        help="An earlier report.json. A probe that showed a delta there and shows none now is "
+             "linked to that delta via Comparison.reruns (the plan's fix-and-rerun step).",
+    )
+    parser.add_argument(
+        "--link",
+        type=_link,
+        action="append",
+        default=[],
+        metavar="NAME=URL",
+        help="Record where this run's evidence lives, e.g. action_run=<CI run URL> (repeatable)",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
     # Windows pipes default to the ANSI codepage, which can't encode the "→" in impact paths.
     sys.stdout.reconfigure(encoding="utf-8")
 
     try:
-        report = pipeline(args.repo, args.base, args.head, args.max_hops, run=args.run)
+        report = pipeline(args.repo, args.base, args.head, args.max_hops, run=args.run,
+                          prior_report=args.prior_report)
     except (SnapshotError, ConfigError, RuntimeError) as exc:
         print(f"behavior-review: {exc}", file=sys.stderr)
         return 2
+    report.links = dict(args.link)
 
     payload = report.model_dump_json(indent=2)
     if args.json:
         args.json.write_text(payload + "\n", encoding="utf-8")
-        print(_summary(report))
-    else:
-        print(payload)
+    if args.markdown:
+        args.markdown.write_text(render_markdown(report), encoding="utf-8")
+    print(_summary(report) if args.json or args.markdown else payload)
     return 0
 
 
