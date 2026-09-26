@@ -85,6 +85,8 @@ jobs:
                   ''
                 ];
 
+                const unknowns = impact.unknowns || [];
+
                 if (outside.length > 0) {
                   lines.push('### ⚠️ Callers Outside Diff');
                   lines.push('| Caller Symbol | File & Line | Rendered Path |');
@@ -95,8 +97,20 @@ jobs:
                     lines.push(`| \`${h0.symbol || ''}\` | \`${h0.path || ''}:${h0.line || ''}\` | \`${renderPath}\` |`);
                   }
                   lines.push('');
+                } else if (unknowns.length > 0) {
+                  lines.push(`⚠️ **No resolved callers outside the diff**, but **${unknowns.length} unresolved reference(s)** exist that could reach changed symbols.\n`);
                 } else {
-                  lines.push('✅ **No non-test callers outside the diff impacted.**\n');
+                  lines.push('✅ **No non-test callers outside the diff impacted (0 unknowns).**\n');
+                }
+
+                if (unknowns.length > 0) {
+                  lines.push('### ❓ Unresolved References (Unknowns)');
+                  lines.push('| File & Line | Enclosing Symbol | Expression | Reason |');
+                  lines.push('|---|---|---|---|');
+                  for (const u of unknowns) {
+                    lines.push(`| \`${u.path || ''}:${u.line || ''}\` | \`${u.symbol || ''}\` | \`${u.expression || ''}\` | ${u.reason || ''} |`);
+                  }
+                  lines.push('\n*Unknown edges are never claimed as safe.*\n');
                 }
 
                 const tests = data.tests || [];

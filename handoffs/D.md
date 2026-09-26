@@ -11,11 +11,11 @@
 
 | Deliverable | File | Status | Notes |
 |---|---|---|---|
-| **D1: Decision Logic** | [`app/decisions.py`](file:///D:/Coding%20Turu/pocbobbin/app/decisions.py) | **Done & Wired** | `validate_and_save`, `lookup`, `approve_decision`, directly queried by `app.cli.pipeline` for `prior_decisions`. |
-| **D2: Decision Ledger** | [`behavior_decisions/`](file:///D:/Coding%20Turu/pocbobbin/behavior_decisions/) | **Done & Seeded** | Contains Scenario 2 approved decision (`10a144dddbe1.json`) citing 30% discount policy change; automatically cited on any subsequent PR touching `apply_discount`. |
-| **D3: Bob Custom Mode** | [`.bob/custom_modes.yaml`](file:///D:/Coding%20Turu/pocbobbin/.bob/custom_modes.yaml) | **Done & Wired to B** | `/behavior-review` mode configured with 7-step MOC loop, paired runner execution (`--run`), prior decision inspection, and Lane B probe JSON format for `needs_bob_action`. |
-| **D4: GitHub Action** | [`.github/workflows/behavior-review.yml`](file:///D:/Coding%20Turu/pocbobbin/.github/workflows/behavior-review.yml) | **Done & Wired to B** | Runs with `--run` (reusing Lane B committed probes and frozen tests), uploads `report.json`, and comments full evidence (tests, comparisons, callers outside diff, prior decisions). |
-| **Tests** | [`tests/test_decisions.py`](file:///D:/Coding%20Turu/pocbobbin/tests/test_decisions.py) | **Done** | 10 unit tests + 4 snapshot CLI tests covering decisions, superseding, and lookup. |
+| **D1: Decision Logic** | `app/decisions.py` | **Done & Wired** | `validate_and_save`, `lookup`, `approve_decision`, directly queried by `app.cli.pipeline` for `prior_decisions`. |
+| **D2: Decision Ledger** | `behavior_decisions/` | **Done & Seeded** | Contains Scenario 2 approved decision (`951cc25e49ee.json`) generated from the real Scenario 2 run; automatically cited on subsequent PRs touching `apply_discount`. |
+| **D3: Bob Custom Mode** | `.bob/custom_modes.yaml` | **Done & Wired to B** | `/behavior-review` mode configured with 7-step MOC loop, paired runner execution (`--run`), prior decision inspection, and Lane B probe JSON format for `needs_bob_action`. |
+| **D4: GitHub Action** | `.github/workflows/behavior-review.yml` | **Done & Wired to B** | Runs with `--run` (reusing Lane B committed probes and frozen tests), uploads `report.json`, and comments full evidence (tests, comparisons, callers outside diff, prior decisions). |
+| **Tests** | `tests/test_decisions.py` | **Done** | 10 unit tests + snapshot CLI tests covering decisions, superseding, and lookup. |
 
 ---
 
@@ -49,14 +49,14 @@
 python -m pytest -q
 # Output:
 # .......................................                                  [100%]
-# 39 passed in 34.40s
+# 39 passed in 30.90s
 
 # Live end-to-end execution with paired execution and prior decision citation
 python -m app.cli --base origin/base --head origin/scenario1-head --run
 # Output includes:
 # - Tests: 6 passed on base, 6 passed on head
 # - Comparisons: price_total_boundary delta_observed (100.0 -> 99.99)
-# - Prior decisions cited: 10a144dddbe1 on apply_discount ("Business policy update: max discount capped at 30%")
+# - Prior decisions cited: 951cc25e49ee on apply_discount ("Business policy update: max discount capped at 30%")
 ```
 
 ---
