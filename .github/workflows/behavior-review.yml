@@ -32,16 +32,18 @@ jobs:
 
       - name: Run Behavior Review
         run: |
-          # Execute behavior review against PR base ref
+          # Execute behavior review with paired execution against PR base ref
           if command -v behavior-review >/dev/null 2>&1; then
             behavior-review \
               --base "origin/${{ github.base_ref }}" \
               --head HEAD \
+              --run \
               --json report.json
           else
             python -m app.cli \
               --base "origin/${{ github.base_ref }}" \
               --head HEAD \
+              --run \
               --json report.json
           fi
 
@@ -97,9 +99,20 @@ jobs:
                   lines.push('✅ **No non-test callers outside the diff impacted.**\n');
                 }
 
+                const tests = data.tests || [];
+                if (tests.length > 0) {
+                  lines.push('### 🧪 Frozen Test Suites');
+                  lines.push('| Revision | Status | Passed | Failed | Errors |');
+                  lines.push('|---|---|---|---|---|');
+                  for (const t of tests) {
+                    lines.push(`| \`${t.revision}\` | \`${t.status}\` | ${t.passed} | ${t.failed} | ${t.errors} |`);
+                  }
+                  lines.push('');
+                }
+
                 const comparisons = data.comparisons || [];
                 if (comparisons.length > 0) {
-                  lines.push('### 🧪 Behavior Comparisons');
+                  lines.push('### 🔬 Paired Probe Comparisons');
                   lines.push('| Probe | Base Output | Head Output | Outcome |');
                   lines.push('|---|---|---|---|');
                   for (const c of comparisons) {
@@ -108,6 +121,31 @@ jobs:
                     const hOut = JSON.stringify(c.head && c.head.output);
                     const outcome = c.outcome || 'unknown';
                     lines.push(`| \`${pId}\` | \`${bOut}\` | \`${hOut}\` | \`${outcome}\` |`);
+                  }
+                  lines.push('');
+                }
+
+                const needsBob = data.needs_bob_action || [];
+                if (needsBob.length > 0) {
+                  lines.push('### 🤖 Needs Bob Action (Unprobed Callers)');
+                  lines.push('The following impacted callers outside the diff lack a committed probe:');
+                  for (const sym of needsBob) {
+                    lines.push(`- \`${sym.path}::${sym.symbol}\``);
+                  }
+                  lines.push('\n*Run `/behavior-review` in Bob IDE to author missing probes.*\n');
+                }
+
+                const priorDecisions = data.prior_decisions || [];
+                if (priorDecisions.length > 0) {
+                  lines.push('### 📜 Prior Approved Decisions');
+                  lines.push('| Symbol | Intent | Rationale | Status |');
+                  lines.push('|---|---|---|---|');
+                  for (const d of priorDecisions) {
+                    const sym = (d.target && d.target.symbol) || 'unknown';
+                    const intent = d.intent || 'unknown';
+                    const rat = d.rationale || '-';
+                    const st = d.status || 'approved';
+                    lines.push(`| \`${sym}\` | \`${intent}\` | ${rat} | \`${st}\` |`);
                   }
                   lines.push('');
                 }
