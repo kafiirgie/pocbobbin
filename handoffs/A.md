@@ -24,12 +24,15 @@
 - `app/cli.py` — the single engine entry: `pipeline(repo, base, head, max_hops, run=False)`.
   With `run` (CLI `--run`) it also calls B's `runner.compare(pair, impact=impact)` inside the same
   `open_pair` block and fills `tests`, `comparisons`, `needs_bob_action` and honest limits.
+  Always fills `prior_decisions` via D's `decisions.lookup` on the ledger at the base revision:
+  records whose path + symbol match a changed symbol or any hop on an impact path; superseded
+  records are kept but relabeled `superseded`.
 - `contracts/report_scenario1.json` — generated from a real `--run` of `origin/base` vs
   `origin/scenario1-head`, then labeled `"fixture": true` with one example `unintended` decision.
   Validated by `tests/test_contracts.py`.
 
 ## Checks run
-`pytest -q` → 37 passed, 1 failed on Windows only (B's `test_needs_bob_action_when_a_caller_has_no_probe`
+`pytest -q` → 38 passed, 1 failed on Windows only (B's `test_needs_bob_action_when_a_caller_has_no_probe`
 creates a branch named `head`, which collides with `HEAD` on a case-insensitive filesystem; passes on Linux).
 `behavior-review --base origin/base --head origin/scenario<N>-head --run` on Windows:
 scenario 1 suite 6/6 green both sides, both probes `delta_observed` 100.0 → 99.99, caller

@@ -216,5 +216,5 @@ class ReviewReport(Model):
         default_factory=list, description="Impacted non-test callers with no committed probe."
     )
     decisions: list[Decision] = Field(default_factory=list)
-    prior_decisions: list[Decision] = Field(default_factory=list, description="Approved/stale ledger records matching changed symbols.")
+    prior_decisions: list[Decision] = Field(default_factory=list, description="Ledger records at the base revision for changed or impacted symbols (same path + symbol).")
     limits: list[str] = Field(default_factory=list)
