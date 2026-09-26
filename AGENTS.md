@@ -1,36 +1,91 @@
 # AGENTS.md
 
-Behavior review before and after a PR. Full plan: `FINAL_PLAN.md` (§8 scope, §10 lanes).
+This repository implements Behavior Review before and after a PR. `FINAL_PLAN.md` is authoritative.
 
-## Rules
-- AI proposes, algorithms verify, humans decide. Only real process output counts as a result.
-- Unknown edge ≠ no impact. Setup/import error, timeout, nondeterminism → `inconclusive`, never "bug".
-- Never edit a probe to make a difference disappear. Fixes rerun the unchanged probe.
-- Edit only your lane's files. Schema changes go through A (`app/schemas.py` + `contracts/` in one commit).
-- Fixtures carry `"fixture": true` and never appear in the final demo.
-- No local paths (`C:/Users/...`) in anything published — reports carry repo-relative paths only.
+## Non-negotiable rules
 
-## Contracts (`app/schemas.py`)
-| Function | Input → Output | Owner |
-|---|---|---|
-| `snapshot.open_pair` / `resolve_pair` | repo, base, head → `RevisionPair` (detached worktrees; `pair.revisions` has SHAs + changed files) | A |
-| `impact.analyze` | `RevisionPair` → `ImpactResult` (changed symbols, edges, paths, unknowns) | A |
-| `runner.compare` | `RevisionPair`, `impact=` → `SuiteRun`s, `Comparison`s, `needs_bob_action`, notes (called by `cli.pipeline(run=True)`) | B |
-| `decisions.validate_and_save` | delta, disposition, rationale → `Decision` or error | D |
-| `decisions.lookup` | approved records, symbols → matches / stale | D |
-| `report.render` | `ReviewReport` → Markdown, web data | C |
+- AI proposes, algorithms verify, humans decide.
+- Only real process output counts as evidence.
+- Unknown edge is not no impact.
+- Setup/import error, timeout, or nondeterminism is `inconclusive`, never a bug.
+- Never edit a probe to make a difference disappear; fixes rerun the unchanged probe.
+- Fixtures use `"fixture": true` and must not appear as final demo evidence.
+- Do not publish local absolute paths or secrets.
+- Edit only your lane's files. Shared schema changes go through A.
 
-Example of the finished output: `contracts/report_scenario1.json`.
+## Shared contracts
 
-## Ownership
-- A: `app/schemas.py snapshot.py impact.py cli.py`, `pyproject.toml`, `contracts/`, `tests/` (engine tests)
+- `snapshot.open_pair` / `resolve_pair`: A
+- `impact.analyze`: A
+- `runner.compare`: B
+- `decisions.validate_and_save` / `lookup`: D
+- `report.render`: C
+
+The authoritative schema is `app/schemas.py`. The example report is `contracts/report_scenario1.json`.
+
+## Person C branch focus
+
+The current working branch is `person-c`. Before editing, run:
+
+```bash
+git branch --show-current
+```
+
+Person C owns:
+
+- `app/report.py`
+- `web/`
+- C-owned renderer/UI tests and handoff documentation
+
+Person C is building a React + TypeScript + Vite + Tailwind + shadcn evidence viewer. The UI must show run metadata, changed symbols, impact paths, unknowns, probe inputs, base/head outputs, outcomes, human dispositions, limits, and Action/artifact links. Visitor decisions are session-only and never approvals.
+
+Do not modify A/B/D-owned engine, probe, decision, Bob, or workflow files without agreement:
+
+- A: `app/schemas.py`, `app/snapshot.py`, `app/impact.py`, `app/cli.py`, `pyproject.toml`, `contracts/`
 - B: `app/runner.py`, `probes/`, `sample_project/`
-- C: `app/report.py`, `web/`
 - D: `app/decisions.py`, `behavior_decisions/`, `.bob/`, `.github/workflows/`
 
+## C visual direction
+
+Use a restrained IBM/Carbon-informed evidence dossier:
+
+- neutral surfaces and one primary blue accent
+- clear hierarchy for evidence, paths, hashes, and outputs
+- minimal decoration and no fake terminal/dashboard screenshots
+- responsive layout, accessible contrast, visible focus
+- light/dark support and reduced-motion support
+
+`tasteskill.dev` is a visual reference only, not a runtime dependency.
+
 ## Commands
+
+Engine from repository root:
+
+```bash
+python -m venv .venv
+python -m pytest -q
 ```
-python -m venv .venv && .venv/Scripts/pip install -e ".[dev]"   # Linux/macOS: .venv/bin/pip
-behavior-review --base main --head HEAD --json report.json
-pytest -q
+
+Frontend from `web/`:
+
+```bash
+npm install
+npm run dev
+npm run typecheck
+npm run build
+npm run preview
 ```
+
+Vercel configuration:
+
+```text
+Root Directory: web
+Build Command: npm run build
+Output Directory: dist
+```
+
+## Branch and handoff rules
+
+- Keep Person C work on `person-c`; never push it to `main`.
+- Keep commits focused and include actual test results.
+- Update the C handoff with files, commands, results, assumptions, blockers, and next steps.

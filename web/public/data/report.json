@@ -1,0 +1,121 @@
+{
+  "schema_version": "0.1",
+  "fixture": true,
+  "run": {
+    "repo": "fixture/sample-project",
+    "base_sha": "fixture-base",
+    "head_sha": "fixture-head",
+    "generated_at": "2026-09-26T12:00:00Z",
+    "status": "complete"
+  },
+  "changed_symbols": [
+    {
+      "path": "pricing/discount.py",
+      "symbol": "apply_discount",
+      "line": 4,
+      "change_type": "body_changed",
+      "tags": ["body_changed"]
+    }
+  ],
+  "impact": {
+    "paths": [
+      {
+        "id": "fixture-path-1",
+        "nodes": [
+          {
+            "path": "pricing/discount.py",
+            "symbol": "apply_discount",
+            "line": 4,
+            "outside_diff": false,
+            "role": "changed symbol"
+          },
+          {
+            "path": "pricing/invoice.py",
+            "symbol": "price_total",
+            "line": 12,
+            "outside_diff": true,
+            "role": "caller outside diff"
+          }
+        ]
+      }
+    ],
+    "unknowns": [
+      {
+        "from": "pricing.invoice.price_total",
+        "to": "external caller",
+        "path": "pricing/invoice.py",
+        "line": 12,
+        "reason": "Fixture edge: the bounded call graph stops at this boundary."
+      }
+    ]
+  },
+  "observations": [
+    {
+      "id": "fixture-observation-delta",
+      "name": "invoice total at rounding boundary",
+      "input": {
+        "items": [
+          {"unit_price": "50.00", "quantity": 2}
+        ],
+        "discount": "0.10"
+      },
+      "probe_hash": "fixture-probe-delta",
+      "base": {"output": "100.00"},
+      "head": {"output": "99.99"},
+      "outcome": "delta_observed",
+      "details": "Fixture-only comparison. Replace with paired engine output before making review claims."
+    },
+    {
+      "id": "fixture-observation-same",
+      "name": "ordinary discount case",
+      "input": {
+        "subtotal": "50.00",
+        "rate": "0.10"
+      },
+      "probe_hash": "fixture-probe-same",
+      "base": {"output": "45.00"},
+      "head": {"output": "45.00"},
+      "outcome": "same_on_tested_cases",
+      "details": "Fixture-only comparison; matching output is limited to this tested input."
+    },
+    {
+      "id": "fixture-observation-inconclusive",
+      "name": "head import check",
+      "input": {
+        "subtotal": "10.00"
+      },
+      "probe_hash": "fixture-probe-inconclusive",
+      "base": {"output": "10.00"},
+      "head": {"exception": "ImportError: optional dependency unavailable"},
+      "outcome": "inconclusive",
+      "setup_status": "import_error",
+      "details": "Fixture-only setup failure. A comparable result was not established."
+    }
+  ],
+  "tests": {
+    "status": "passed",
+    "label": "Frozen test suite",
+    "details": "Fixture metadata only; this is not execution evidence."
+  },
+  "decisions": [
+    {
+      "id": "fixture-decision-delta",
+      "observation_id": "fixture-observation-delta",
+      "probe_hash": "fixture-probe-delta",
+      "disposition": "unresolved",
+      "status": "fixture_context",
+      "rationale": "Fixture context only: the observed difference still needs a human disposition in a real run."
+    }
+  ],
+  "limits": [
+    "This is fixture data for UI integration, not a real repository run.",
+    "Impact analysis is bounded; the unknown edge is not proof of safety.",
+    "Tested inputs are examples, not proof over every possible input.",
+    "Setup failures, import errors, and timeouts are inconclusive.",
+    "A human disposition does not override failed or inconclusive execution."
+  ],
+  "links": {
+    "action_run": "",
+    "artifact": ""
+  }
+}
