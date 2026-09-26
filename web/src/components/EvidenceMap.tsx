@@ -6,15 +6,15 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  FolderGroup, LineSwatch, MINIMAP_FROM_NODES, PortHandles, TooltipEdge, UNKNOWN_EDGE_DASH, useAsyncLayout,
+  FolderGroup, LineSwatch, MINIMAP_FROM_NODES, PortHandles, TooltipEdge, UNKNOWN_EDGE_DASH, useAsyncLayout, useFlowColorMode,
 } from "@/components/map-parts";
 import { StatusBadge, STATUS_META, TONE_CLASSES } from "@/components/StatusBadge";
-import { TierBadge } from "@/components/TierBadge";
-import { STATUS_PRIORITY } from "@/lib/evidence";
+import { TierBadge, TierLegend } from "@/components/TierBadge";
+import { evidenceNodes, languageOf, STATUS_PRIORITY } from "@/lib/evidence";
 import {
   buildEvidenceMap, type CallFlowEdge, type EvidenceFlowNode, type GroupFlowNode, type MapNode, type TestsFlowNode,
 } from "@/lib/evidence-map";
-import type { ReviewReport } from "@/lib/review-report";
+import type { ReviewReport, Tier } from "@/lib/review-report";
 import { cn } from "@/lib/utils";
 
 interface EvidenceMapProps {
@@ -89,12 +89,19 @@ function Legend() {
   );
 }
 
+/** Tiers of the files the map draws (its file-box badges), not every language the report lists. */
+function mapTiers(report: ReviewReport): Tier[] {
+  const files = new Set([...evidenceNodes(report).values()].map((node) => node.ref.path));
+  return [...files].flatMap((file) => languageOf(report, file)?.tier ?? []);
+}
+
 function Canvas({ report, onSelect }: EvidenceMapProps) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const { nodes, edges, onNodesChange, onEdgesChange, error, reset } = useAsyncLayout<MapNode, CallFlowEdge>(
     () => buildEvidenceMap(report, expanded),
     [report, expanded],
   );
+  const colorMode = useFlowColorMode();
   const leafCount = useMemo(() => nodes.filter((n) => n.type === "evidence" || n.type === "tests").length, [nodes]);
 
   if (error) {
@@ -116,6 +123,7 @@ function Canvas({ report, onSelect }: EvidenceMapProps) {
 
   return (
     <ReactFlow
+      colorMode={colorMode}
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
@@ -157,6 +165,7 @@ export default function EvidenceMap({ report, onSelect }: EvidenceMapProps) {
           rearrange; select one for details; hover an arrow for its call site.
         </CardDescription>
         <Legend />
+        <TierLegend tiers={mapTiers(report)} />
       </CardHeader>
       <CardContent>
         {report.impact.paths.length || report.impact.changed_symbols.length ? (

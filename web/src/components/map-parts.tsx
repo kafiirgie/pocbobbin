@@ -71,6 +71,18 @@ export function LineSwatch({ label, dash }: { label: string; dash?: string }) {
   );
 }
 
+/** React Flow's own Controls and MiniMap follow our `.dark` class toggle, not just the OS setting. */
+export function useFlowColorMode(): "dark" | "light" {
+  const read = (): "dark" | "light" => (document.documentElement.classList.contains("dark") ? "dark" : "light");
+  const [mode, setMode] = useState(read);
+  useEffect(() => {
+    const observer = new MutationObserver(() => setMode(read()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+  return mode;
+}
+
 /**
  * Runs an async (ELK) layout into React Flow state, fits the view, and can re-run it ("Reset layout").
  * `focus` picks the node ids to fit first (e.g. a PR's files in a large repo); empty means fit everything.

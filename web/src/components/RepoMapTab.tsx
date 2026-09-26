@@ -9,9 +9,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FolderGroup, LineSwatch, MINIMAP_FROM_NODES, PortHandles, TooltipEdge, useAsyncLayout } from "@/components/map-parts";
+import { FolderGroup, LineSwatch, MINIMAP_FROM_NODES, PortHandles, TooltipEdge, useAsyncLayout, useFlowColorMode } from "@/components/map-parts";
 import { TONE_CLASSES } from "@/components/StatusBadge";
-import { TierBadge } from "@/components/TierBadge";
+import { TierBadge, TierLegend } from "@/components/TierBadge";
 import type { TooltipFlowEdge } from "@/lib/nested-layout";
 import { buildRepoMap, parseRepoMap, type ModuleFlowNode, type RepoMap, type RepoMapNode } from "@/lib/repo-map";
 import { fetchJson, shortSha } from "@/lib/review-report";
@@ -79,6 +79,7 @@ const edgeTypes = { call: TooltipEdge };
 
 function Canvas({ map, changedFiles, onShowEvidence }: { map: RepoMap } & RepoMapTabProps) {
   const changed = useMemo(() => new Set(changedFiles), [changedFiles]);
+  const colorMode = useFlowColorMode();
   const { nodes, edges, onNodesChange, onEdgesChange, error, reset } = useAsyncLayout<RepoMapNode, TooltipFlowEdge>(
     () => buildRepoMap(map, changed),
     [map, changed],
@@ -95,6 +96,7 @@ function Canvas({ map, changedFiles, onShowEvidence }: { map: RepoMap } & RepoMa
   }
   return (
     <ReactFlow
+      colorMode={colorMode}
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
@@ -170,6 +172,7 @@ export default function RepoMapTab({ changedFiles, onShowEvidence }: RepoMapTabP
           <li><Badge variant="outline" className={TONE_CLASSES.info}><GitPullRequest aria-hidden="true" />Changed in this PR</Badge></li>
           <LineSwatch label="Import" />
         </ul>
+        <TierLegend tiers={map.modules.map((module) => module.tier)} />
       </CardHeader>
       <CardContent className="space-y-4">
         <div role="group" aria-labelledby="repo-map-heading" className="h-128 w-full overflow-hidden rounded-md border bg-background">
