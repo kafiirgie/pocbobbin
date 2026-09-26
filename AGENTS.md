@@ -15,7 +15,7 @@ Behavior review before and after a PR. Full plan: `FINAL_PLAN.md` (§8 scope, §
 |---|---|---|
 | `snapshot.open_pair` / `resolve_pair` | repo, base, head → `RevisionPair` (detached worktrees; `pair.revisions` has SHAs + changed files) | A |
 | `impact.analyze` | `RevisionPair` → `ImpactResult` (changed symbols, edges, paths, unknowns) | A |
-| `runner.compare` | `RevisionPair`, `ProbeBundle` → `Comparison`s, `SuiteRun`s | B |
+| `runner.compare` | `RevisionPair`, `impact=` → `SuiteRun`s, `Comparison`s, `needs_bob_action`, notes (called by `cli.pipeline(run=True)`) | B |
 | `decisions.validate_and_save` | delta, disposition, rationale → `Decision` or error | D |
 | `decisions.lookup` | approved records, symbols → matches / stale | D |
 | `report.render` | `ReviewReport` → Markdown, web data | C |

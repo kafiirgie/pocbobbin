@@ -11,24 +11,23 @@ import sys
 from pathlib import Path
 
 from app.impact import analyze
-from app.schemas import ImpactResult, ReviewReport
+from app.runner import compare
+from app.schemas import ImpactResult, ReviewReport, SymbolRef
 from app.snapshot import SnapshotError, open_pair
 
 
-def _limits(impact: ImpactResult, ran_execution: bool = False, probed: set[str] | None = None) -> list[str]:
+def _limits(impact: ImpactResult, executed: bool, unprobed: list[SymbolRef]) -> list[str]:
     limits = [
         f"Callers traced up to {impact.max_hops} hops; deeper callers are not shown.",
         "Impact is static (AST): calls through variables, dynamic dispatch or class hierarchies may be missed. "
         "Unresolved references that could reach a changed symbol are listed as unknowns, not as safe.",
     ]
-    if ran_execution:
+    if executed:
         limits.append(
             "'same_on_tested_cases' means identical output for these frozen inputs only; it is not proof of equivalence."
         )
     else:
         limits.append("No tests or probes were executed in this run, so no behavior claim is made.")
-    unprobed = [p for p in impact.paths if p.outside_diff and not p.is_test
-                and (probed is not None and p.hops[0].key not in probed)]
     if unprobed:
         limits.append(
             f"{len(unprobed)} impacted non-test caller(s) outside the diff have no committed probe; "
@@ -37,10 +36,22 @@ def _limits(impact: ImpactResult, ran_execution: bool = False, probed: set[str] 
     return limits
 
 
-def pipeline(repo: str | Path, base: str, head: str, max_hops: int = 2) -> ReviewReport:
+def pipeline(repo: str | Path, base: str, head: str, max_hops: int = 2, run: bool = False) -> ReviewReport:
+    """Snapshot → impact → (with `run`) paired execution of the frozen suite and committed probes."""
     with open_pair(repo, base, head) as pair:
         impact = analyze(pair, max_hops)
-    return ReviewReport(repo=pair.repo, revisions=pair.revisions, impact=impact, limits=_limits(impact))
+        if not run:
+            return ReviewReport(repo=pair.repo, revisions=pair.revisions, impact=impact, limits=_limits(impact, False, []))
+        suites, comparisons, missing, notes = compare(pair, impact=impact)
+    return ReviewReport(
+        repo=pair.repo,
+        revisions=pair.revisions,
+        impact=impact,
+        tests=suites,
+        comparisons=comparisons,
+        needs_bob_action=missing,
+        limits=_limits(impact, bool(suites or comparisons), missing) + notes,
+    )
 
 
 def _unique_entry_points(paths: list) -> list:
@@ -106,12 +117,7 @@ def main(argv: list[str] | None = None) -> int:
     sys.stdout.reconfigure(encoding="utf-8")
 
     try:
-        if args.run:
-            from app.runner import pipeline as run_pipeline
-
-            report = run_pipeline(args.repo, args.base, args.head, args.max_hops)
-        else:
-            report = pipeline(args.repo, args.base, args.head, args.max_hops)
+        report = pipeline(args.repo, args.base, args.head, args.max_hops, run=args.run)
     except SnapshotError as exc:
         print(f"behavior-review: {exc}", file=sys.stderr)
         return 2

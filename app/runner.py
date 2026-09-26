@@ -1,8 +1,8 @@
 """Paired execution: identical bytes on both revisions. Owner: B.
 
 Implements A's contract `runner.compare(pair, bundle) -> tests, comparisons,
-needs_bob_action` and emits A's `ReviewReport`, so the CLI can call this inside
-`with open_pair(...)` and every door then consumes one object.
+needs_bob_action`; `app.cli.pipeline(..., run=True)` calls it inside
+`with open_pair(...)` and builds the one `ReviewReport` every door consumes.
 
 Rules this file must keep (FINAL_PLAN.md section 5):
   * the frozen BASE test suite runs on both revisions, same bytes;
@@ -33,7 +33,6 @@ try:  # pragma: no cover - exercised by whichever entry point runs first
         Outcome,
         Probe,
         ProbeBundle,
-        ReviewReport,
         Revision,
         RunStatus,
         SuiteRun,
@@ -144,7 +143,7 @@ def _canon(value) -> str:
 
 
 def compare(pair, bundle=None, python: str | None = None, probes_dir: str = PROBES_DIR,
-            tests_rel: str = TESTS_DIR):
+            tests_rel: str = TESTS_DIR, impact=None):
     """A's contract: RevisionPair + ProbeBundle -> (suite runs, comparisons, needs_bob_action).
 
     `bundle` is accepted for A's signature; the probes actually executed are the
@@ -202,7 +201,7 @@ def compare(pair, bundle=None, python: str | None = None, probes_dir: str = PROB
             )
             probed.add((_target_path(spec), spec["target"].partition(":")[2]))
 
-    return suites, comparisons, needs_bob_action(pair, comparisons, probed), notes
+    return suites, comparisons, needs_bob_action(impact or analyze(pair), probed), notes
 
 
 def _target_path(spec: dict) -> str:
@@ -231,11 +230,10 @@ def _comparison(probe_file: Path, spec: dict, pair, b, h, outcome):
     )
 
 
-def needs_bob_action(pair, comparisons, probed):
+def needs_bob_action(impact, probed):
     """Impacted non-test callers outside the diff that no committed probe covers."""
     if not HAS_SCHEMA:
         return []
-    impact = analyze(pair)
     covered = set(probed)
     missing = []
     for path in impact.paths:
@@ -247,26 +245,3 @@ def needs_bob_action(pair, comparisons, probed):
             if ref.key not in {m.key for m in missing}:
                 missing.append(ref)
     return missing
-
-
-def pipeline(repo, base: str, head: str, max_hops: int = 2, python: str | None = None):
-    """Full engine: snapshot -> impact -> paired execution -> one ReviewReport."""
-    from app.cli import _limits
-    from app.impact import analyze
-    from app.snapshot import open_pair
-
-    with open_pair(repo, base, head) as pair:
-        impact = analyze(pair, max_hops)
-        suites, comparisons, missing, notes = compare(pair, python=python)
-        probed = {c.probe.target.key for c in comparisons if HAS_SCHEMA}
-        limits = _limits(impact, ran_execution=bool(suites or comparisons), probed=probed)
-        limits += notes
-        return ReviewReport(
-            repo=pair.repo,
-            revisions=pair.revisions,
-            impact=impact,
-            tests=suites,
-            comparisons=comparisons,
-            needs_bob_action=missing,
-            limits=limits,
-        )
