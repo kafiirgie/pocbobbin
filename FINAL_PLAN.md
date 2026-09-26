@@ -195,7 +195,7 @@ Lookup matches exact repo + path + symbol from approved records on `main`. Stale
 | **P1.4** | **Evidence map (Lane E)** | Scenario 1's real report renders as a node-link map: changed symbol, caller outside diff, node colors from real outcomes, unknown edges dashed (§16.2) |
 | **P1.5** | **`CHANGE_NOTES.md` from Bob** | `/behavior-review` writes a draft labeled "drafted by Bob" plus 2–3 questions the author must answer; answers become the ledger rationale (§16.4, `TODO(D)`) |
 | P2.1 | Whole-repo module map (Lane E) | `behavior-review map` writes `repo_map.json`; web shows modules, imports, last commit/PR per module, support tier per language (§16.3) |
-| P2 | Polish (incl. 21st.dev UI refresh) | Only after all above work |
+| P2 | Polish (incl. shadcn/ui UI refresh) | Only after all above work |
 
 **Cut order if time runs out:** visual polish → whole-repo map (P2.1) → richer graph coverage → Scenario 5 lookup → evidence map interactivity (keep a static render) → demo page interactivity (keep a static page) → nothing else.
 **Never cut:** real paired execution, caller-outside-diff, human decision + ledger, Bob custom mode.
@@ -247,8 +247,8 @@ behavior-review/
 | Multi-language | `tree-sitter` + `tree-sitter-language-pack`, required since #23 (languages are auto-detected when there is no `behavior.json`) |
 | Test/probe execution | Each language's own runner, called as an argv command (pytest, Vitest, or what `behavior.json` configures) |
 | Web | React 18 + Vite + TypeScript + Tailwind v4, shadcn-style components in `web/src/components/ui/` |
-| Maps (Lane E, new) | **React Flow (`@xyflow/react`) + dagre** for layout — `TODO(C)`: approve the two dependencies in `web/package.json` |
-| UI components | **21st.dev** (shadcn-format React + Tailwind components) for the UI refresh — `TODO(C)`, rules in §16.6 |
+| Maps (Lane E, new) | **React Flow (`@xyflow/react`)** with group nodes (folder → file → function) + **ELK (`elkjs`)** for nested layout, lazy-loaded — `TODO(C)`: approve the two dependencies in `web/package.json`. (Not dagre: React Flow's docs note dagre mis-lays sub-flows whose nodes connect outside the group — exactly our cross-folder case.) |
+| UI components | **shadcn/ui only** (installed via the shadcn CLI or the free shadcn MCP in Bob/Claude Code) for the UI refresh — `TODO(C)`, rules in §16.6. No 21st.dev. |
 
 Still no ORM, Redis, graph DB, vector store, or webhook server.
 
@@ -269,7 +269,7 @@ A approves any shared schema change and tells affected owners.
 
 ### GitHub Action (sketch)
 
-On `pull_request` (opened, synchronize, reopened): checkout with full history → `pip install -e .` → `behavior-review --base origin/${{ github.base_ref }} --head HEAD --run --link action_run=<run URL> --json report.json` (`--markdown report.md` is also available) → upload `report.json` as artifact → create/update **one** PR comment. Permissions: `contents: read`, `pull-requests: write`. The Action **reuses committed probes**; it never calls Bob. If an impacted caller has no probe, the report says `needs_bob_action` — the author runs `/behavior-review` in Bob IDE to create one.
+On `pull_request` (opened, synchronize, reopened): checkout with full history → `pip install -e .` → `behavior-review --base origin/${{ github.base_ref }} --head HEAD --run --link action_run=<run URL> --json report.json` (`--markdown report.md` is also available) → `behavior-review map --ref HEAD --out repo_map.json` → upload `report.json` + `repo_map.json` as one artifact → create/update **one** PR comment. Permissions: `contents: read`, `pull-requests: write`. The Action **reuses committed probes**; it never calls Bob. If an impacted caller has no probe, the report says `needs_bob_action` — the author runs `/behavior-review` in Bob IDE to create one.
 
 ---
 
@@ -399,7 +399,7 @@ The per-lane schedule is in §10. These times do not move:
 - [ ] Slides, cover image, tags, description, Vercel URL
 - [ ] README: install (`pip install -e .`), run CLI, use `/behavior-review`, how the Action works, limits, **Python ≥ 3.11**
 - [ ] README: **language support tier table** from §17 — no "supports 15 languages" claim without the tiers
-- [ ] Licenses of any 21st.dev components copied into `web/` are MIT-compatible and listed
+- [ ] Third-party UI/graph libraries in `web/` (shadcn/ui, React Flow, elkjs, lucide) listed with licenses in `web/THIRD_PARTY.md`
 - [ ] No secrets, no local paths (e.g. `C:/Users/...`) in published files
 - [ ] Fresh-browser check of every link before 21:00
 
@@ -447,7 +447,14 @@ Source: the existing `ReviewReport` — **no engine or schema change needed.**
 
 If a node matches several states, show the strongest: **delta > inconclusive > needs probe > pre-existing > same > changed/outside-diff**, with the others as badges.
 
-Rendering: React Flow + dagre, left-to-right (callers → changed symbol). Legend always visible. The map header shows a **language + tier badge** read from `report.analysis` (§19) — never guessed from file extensions. Works at phone width (map scrolls inside its card). A static fallback (same layout, no drag/zoom) is acceptable if interactivity is cut.
+Rendering: React Flow + ELK, left-to-right (callers → changed symbol), **nested like an architecture diagram**: folders are large group blocks, files are boxes inside them, and the changed/impacted functions sit inside their file box, colored by evidence. Edges cross folder boundaries freely (that cross-folder edge is the "outside the diff" story). Legend always visible. The map header shows a **language + tier badge** read from `report.analysis` (§19) — never guessed from file extensions. Works at phone width (map scrolls inside its card). A static fallback (same layout, no drag/zoom) is acceptable if interactivity is cut.
+
+**Interaction and readability requirements** (from reviewing the first build on `feat/web-shadcn-redesign`, which used `smoothstep` edges, `nodesDraggable={false}`, and line-number labels on edges):
+- Nodes draggable with proper React Flow state; a "Reset layout" button re-runs the layout. Pan, zoom, MiniMap.
+- Smooth **bezier** edges (React Flow default type), spread entry points so edges don't merge into one trunk.
+- No text labels on edges; call-site `path:line` goes in an edge tooltip and the node's details Sheet.
+- **Test callers collapsed** into one expandable node per symbol ("5 tests call `apply_discount`") so the real caller outside the diff (`price_total`) is visible after `fitView`.
+- `fitView` shows every node on load.
 
 **Done when:** the real Scenario 1 report shows `invoice.price_total` as "outside diff · behavior differs", `discount.apply_discount` as changed, and every unknown as a dashed edge — with no fixture data.
 
@@ -478,7 +485,7 @@ Draft shape (separate file — `ReviewReport` is untouched):
 }
 ```
 
-UI: a "Repo map" tab. When a report is loaded, modules touched by the PR are highlighted and link to the evidence map. Large repos: group by folder (collapsed) — only if time allows; the sample repo is small.
+UI: a "Repo map" tab with the same nested look — **folders as group blocks (nested folders nest), files as boxes inside, import edges between files**. Folders can collapse; when collapsed, their file edges are merged into one folder-level edge. When a report is loaded, files touched by the PR are highlighted and link to the evidence map. Folder grouping is derived from file paths — no schema change.
 
 **Done when:** `repo_map.json` for the sample repo lists every module, its imports, and its last commit/PR; a test covers Python plus at least one Tree-sitter language; unknown imports are listed, not dropped.
 
@@ -495,26 +502,28 @@ Lane E creates only new files. Everything below touches another lane's files and
 
 | ID | Owner | Task | Why E needs it | Status |
 |---|---|---|---|---|
-| `TODO(C)-1` | C | Add `@xyflow/react` and `@dagrejs/dagre` to `web/package.json` | Map rendering | [ ] |
+| `TODO(C)-1` | C | Add `@xyflow/react` and `elkjs` to `web/package.json` (lazy-load the map tabs) | Map rendering | [ ] |
+| `TODO(E)-2` | E | Apply the §16.2 interaction/readability requirements and migrate the map from dagre to ELK nested groups on `feat/web-shadcn-redesign` (prompt: team chat / `handoffs/E.md`) | Map currently hard to read and not draggable | [ ] |
+| `TODO(B)-4` | B | Optional: enrich `sample_project/` to 3–4 folders (e.g. `pricing/`, `billing/`, `reports/`, `api/`) so the impacted caller sits in a **different folder** from the changed function; Scenarios 1–5 must keep their verified results | Nested map looks meaningful in the video | [ ] |
 | `TODO(C)-2` | C | Mount `<EvidenceMap>` in `App.tsx` (near/instead of the list in `ImpactPath.tsx`) and later a "Repo map" tab | Show the map on the page | [ ] |
 | `TODO(C)-3` | C | Expose raw `impact.edges`, `impact.unknowns`, `comparisons`, `needs_bob_action`, `decisions` from `report-adapter.ts`, **or** let E read the raw report JSON directly | Node states need these fields | [ ] |
 | `TODO(C)-4` | C | Copy `repo_map.json` into `web/public/data/` next to `report.json` | Repo map tab | [ ] |
-| `TODO(C)-5` | C | UI refresh with 21st.dev (rules in §16.6); define theme tokens first so the maps use the same colors | Consistent look | [ ] |
-| `TODO(A)-1` | A | Add the `map` subcommand in `cli.py` calling `repo_map.build` (E writes the function) | CLI entry | [ ] |
-| `TODO(A)-2` | A | Expose a small public function for import parsing/resolution in `impact_treesitter.py` (today `_parse_language_imports` / `_resolve_import` are private) | Reuse adapters, no copy-paste | [ ] |
-| `TODO(A)-3` | A | Check name-based call matching for false edges (e.g. the PHP fixture calls `apply($value)` inside a class — in PHP that is a global function, not `$this->apply`) | Maps must not draw edges that don't exist | [x] bare calls resolve to a sibling method only in implicit-receiver languages; PHP `$this->`/`static::` now resolve |
-| `TODO(D)-1` | D | Action also runs `behavior-review map` and uploads `repo_map.json` as an artifact | Real, linkable map data | [ ] |
+| `TODO(C)-5` | C | UI refresh with shadcn/ui (rules in §16.6; prompt in `handoffs/C.md` or the team chat); define theme tokens first so the maps use the same colors | Consistent look | [ ] |
+| `TODO(A)-1` | A | Add the `map` subcommand in `cli.py` calling `repo_map.build` (E writes the function) | CLI entry | [x] `behavior-review map --ref HEAD --out repo_map.json` |
+| `TODO(A)-2` | A | Expose a small public function for import parsing/resolution in `impact_treesitter.py` (today `_parse_language_imports` / `_resolve_import` are private) | Reuse adapters, no copy-paste | [x] `import_graph()` in both `impact.py` and `impact_treesitter.py`, returning `ImportRef`s |
+| `TODO(A)-3` | A | Check name-based call matching for false edges (e.g. the PHP fixture calls `apply($value)` inside a class — in PHP that is a global function, not `$this->apply`) | Maps must not draw edges that don't exist | [x] bare calls resolve to a sibling method only in implicit-receiver languages; PHP `$this->`/`static::` now resolve (#24) |
+| `TODO(D)-1` | D | Action also runs `behavior-review map` and uploads `repo_map.json` as an artifact | Real, linkable map data | [x] same artifact as `report.json` |
 | `TODO(D)-2` | D | Add the `CHANGE_NOTES.md` instructions (E's template) to `.bob/custom_modes.yaml` | P1.5 | [ ] |
 | `TODO(B)-1` | B | Confirm `comparisons[].probe.target` always matches the `SymbolRef` used in `impact` (same path + symbol spelling) — **for every supported language**, e.g. Tree-sitter's `Discount.apply` in Java (§19 row 9) | Map joins outcomes to nodes by that key | [ ] |
 | `TODO(A)-4…`, `TODO(B)-2`, `TODO(C)-6`, `TODO(D)-3…`, `TODO(E)-1` | various | Multi-language consistency items | See §19 | [ ] |
 | `TODO(C/pitch)-1` | C | Put the evidence map frame in the video (§13) and the tier table on a slide | Story | [ ] |
 
-### 16.6 UI rules for 21st.dev (for `TODO(C)-5`)
+### 16.6 UI rules (for `TODO(C)-5`)
 
-1. Pick few components; skip any that pull heavy extra libraries.
-2. Check **Tailwind v4** compatibility (the web uses v4; many snippets assume v3).
-3. Check each component's **license** before copying (submission must be MIT-compliant) and list it.
-4. Use the website/CLI to copy components; don't depend on the 21st AI generator (needs an API key and muddies "built with Bob").
+1. **shadcn/ui only** for UI components; React Flow + ELK for maps; lucide for icons. Anything shadcn lacks is composed from shadcn primitives. Adding any other UI library needs the team's OK first.
+2. `web/` has no `components.json` yet: run `npx shadcn@latest init` in `web/` (Vite + Tailwind v4) once, keeping the existing tokens.
+3. Optional: the **shadcn MCP** (free, no API key) lets Bob search/install components — project config in `.bob/mcp.json` with `"cwd": "web"`. Ask Bob for specific components; listing the whole registry wastes Bobcoins.
+4. List every UI/graph library and its license in `web/THIRD_PARTY.md` (submission must be MIT-compliant).
 5. Fix theme first — colors, spacing, type scale, dark mode — then components. Map node colors come from the same tokens.
 
 ### 16.7 Lane E schedule
@@ -584,15 +593,15 @@ Add `tier` to `AdapterSpec` in `app/adapters/registry.py` (values: `full`, `stat
 }
 ```
 
-A announces the change, updates `contracts/` fixtures and `tests/test_contracts.py` in the same commit (rule §10.2). `config_source` is `"behavior.json"`, `"detected"` (auto-detection, #23) or `"defaults"`; both the file and detection come from the base revision. **As built:** the fields above describe the primary language, and `analysis.languages` lists every adapter that ran (`language`, `adapter`, `tier`) for mixed repositories; limits warn once per language below `full`.
+A announces the change, updates `contracts/` fixtures and `tests/test_contracts.py` in the same commit (rule §10.2). `config_source` is `"behavior.json"`, `"detected"` (auto-detection, #23) or `"defaults"`; both the file and detection come from the base revision. **As built (#24):** the fields above describe the primary language, and `analysis.languages` lists every adapter that ran (`language`, `adapter`, `tier`) for mixed repositories; limits warn once per language below `full`.
 
 ### 19.3 Consistency matrix
 
 | # | Layer | Must be true for every language | Today (code reading) | Owner / TODO |
 |---|---|---|---|---|
-| 1 | Adapter registry | Each adapter declares its tier | ✅ `AdapterSpec.tier` | ~~`TODO(A)-4`~~ done |
-| 2 | Report | Report says which language/adapter/tier produced it | ✅ `report.analysis` | ~~`TODO(A)-5`~~ done |
-| 3 | Limits text | Non-`full` tiers add a plain warning, e.g. "Kotlin support is experimental: same-file callers only; treat missing paths as unknown" | ✅ tier warning from `TIER_LIMITS` | ~~`TODO(A)-6`~~ done |
+| 1 | Adapter registry | Each adapter declares its tier | ✅ `AdapterSpec.tier` (#24) | ~~`TODO(A)-4`~~ done |
+| 2 | Report | Report says which language/adapter/tier produced it | ✅ `report.analysis` (#24) | ~~`TODO(A)-5`~~ done |
+| 3 | Limits text | Non-`full` tiers add a plain warning, e.g. "Kotlin support is experimental: same-file callers only; treat missing paths as unknown" | ✅ tier warning from `TIER_LIMITS` (#24) | ~~`TODO(A)-6`~~ done |
 | 4 | Test execution | Unknown/unsupported test reporter → suite result **inconclusive**, never counted as passing | Parsers: pytest text, Vitest JSON only | **`TODO(B)-2`** verify + test this for a Go/Java config |
 | 5 | Probe harness | Each tier ≥ `static_probe` has a documented probe format (`run_probe.py`, `run_probe.ts`, `command` via `run_command_probe.py`) | Harnesses exist; formats not in one doc | **`TODO(B)-3`** one table in README: language → probe format + example |
 | 6 | GitHub Action | Reads `behavior.json`; installs `.[multilang]` when language ≠ python; sets up the needed toolchain (Node, Go, JDK…); **no `\|\| true`** that hides install errors; tool install works for a repo that isn't this one (pinned git URL) | Python 3.11 only, no `[multilang]`, no other toolchains, `\|\| true` present | **`TODO(D)-3`** |

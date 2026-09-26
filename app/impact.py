@@ -23,6 +23,7 @@ from app.schemas import (
     Hop,
     ImpactPath,
     ImpactResult,
+    ImportRef,
     Revision,
     RevisionPair,
     SymbolRef,
@@ -58,6 +59,15 @@ class Module:
     # local name -> (absolute module, imported attribute or None for `import x`)
     bindings: dict[str, tuple[str, str | None]] = field(default_factory=dict)
     star_imports: list[str] = field(default_factory=list)
+    import_statements: list[ImportStatement] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ImportStatement:
+    line: int
+    expression: str
+    candidates: tuple[str, ...]  # dotted module names, most specific first
+    reason: str = ""  # set when no candidate can exist (dynamic import, relative beyond the top)
 
 
 # --- Parsing -----------------------------------------------------------------
@@ -151,6 +161,41 @@ def _collect_bindings(module: Module, tree: ast.Module) -> None:
                     module.bindings[alias.asname or alias.name] = (source, alias.name)
 
 
+def _dynamic_import(node: ast.Call) -> ImportStatement | None:
+    """`importlib.import_module(x)` / `__import__(x)`: resolvable only when `x` is a string literal."""
+    func = node.func
+    name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+    if name not in {"import_module", "__import__"}:
+        return None
+    expression = ast.unparse(node)[:120]
+    arg = node.args[0] if node.args else None
+    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+        return ImportStatement(node.lineno, expression, (arg.value,))
+    return ImportStatement(node.lineno, expression, (), "dynamic import")
+
+
+def _collect_imports(module: Module, tree: ast.Module) -> None:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            module.import_statements += [
+                ImportStatement(node.lineno, f"import {alias.name}", (alias.name,)) for alias in node.names
+            ]
+        elif isinstance(node, ast.ImportFrom):
+            source = _import_source(node, module)
+            expression = ast.unparse(node)[:120]
+            if source is None:
+                module.import_statements.append(
+                    ImportStatement(node.lineno, expression, (), "relative import beyond the top-level package")
+                )
+                continue
+            module.import_statements += [
+                ImportStatement(node.lineno, expression, (source,) if alias.name == "*" else (f"{source}.{alias.name}", source))
+                for alias in node.names
+            ]
+        elif isinstance(node, ast.Call) and (dynamic := _dynamic_import(node)):
+            module.import_statements.append(dynamic)
+
+
 def _load_module(file: Path, rel: PurePosixPath, name: str) -> Module:
     module = Module(path=rel.as_posix(), name=name, is_package=rel.name == "__init__.py")
     try:
@@ -165,6 +210,7 @@ def _load_module(file: Path, rel: PurePosixPath, name: str) -> Module:
     module.toplevel = _toplevel(rest)
     module.scopes.append((MODULE, None, rest))
     _collect_bindings(module, tree)
+    _collect_imports(module, tree)
     return module
 
 
@@ -240,6 +286,25 @@ class Codebase:
             for name in names:
                 self._by_name[name] = None if name in self._by_name else module
         self.by_path = {m.path: m for m in self.modules}
+
+    def import_refs(self) -> Iterator[ImportRef]:
+        """Each import resolved to a repository file; external packages are left out, ambiguity is reported."""
+        for module in self.modules:
+            for statement in module.import_statements:
+                if statement.reason:
+                    yield ImportRef(source=module.path, target=None, line=statement.line,
+                                    expression=statement.expression, reason=statement.reason)
+                    continue
+                name = next((candidate for candidate in statement.candidates if candidate in self._by_name), None)
+                if name is None:
+                    continue  # not a module of this repository
+                target = self._by_name[name]
+                if target is not None and target.path == module.path:
+                    continue
+                yield ImportRef(
+                    source=module.path, target=target.path if target else None, line=statement.line,
+                    expression=statement.expression, reason="" if target else "ambiguous module name",
+                )
 
     def _lookup(self, module: Module, name: str, depth: int = 0) -> SymbolRef | None:
         if depth > MAX_REEXPORT_DEPTH:
@@ -499,3 +564,9 @@ def analyze(
         for language in settings.languages
     ]
     return _merge_impact_results(results, effective_hops)
+
+
+def import_graph(root: Path) -> tuple[list[str], list[ImportRef]]:
+    """Python modules under `root` and their resolved imports (repo map, FINAL_PLAN §16.3)."""
+    codebase = Codebase(root)
+    return [module.path for module in codebase.modules], list(codebase.import_refs())

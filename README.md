@@ -84,6 +84,17 @@ touched, returns a different number for the same input.
 | `origin/scenario3-head` | Behavior-preserving refactor | `same_on_tested_cases` |
 | `origin/scenario4-head` | Broken setup | `inconclusive`, never "bug" |
 
+### Repo map
+
+```bash
+behavior-review map --ref HEAD --out repo_map.json
+```
+
+Writes a file-level map of the whole repository at that revision: every source module with its
+language and support tier, the import edges between modules, and each module's last mainline
+commit (with its PR number when the subject names one). Imports that can't be resolved statically
+are listed under `unknowns`. The GitHub Action uploads it next to `report.json`.
+
 ### Options
 
 | Option | Default | Meaning |
