@@ -19,6 +19,7 @@ from app.runner import compare
 from app.schemas import (
     Analysis,
     Decision,
+    LanguageSupport,
     DecisionStatus,
     ImpactResult,
     ReviewReport,
@@ -29,8 +30,11 @@ from app.snapshot import SnapshotError, open_pair
 
 
 def _analysis(config: BehaviorConfig) -> Analysis:
-    spec = get_adapter(config.language).spec
-    return Analysis(language=spec.language, adapter=spec.kind, tier=spec.tier, config_source=config.source)
+    supports = [
+        LanguageSupport(language=spec.language, adapter=spec.kind, tier=spec.tier)
+        for spec in (get_adapter(language).spec for language in config.languages)
+    ]
+    return Analysis(**supports[0].model_dump(), config_source=config.source, languages=supports)
 
 
 def _limits(impact: ImpactResult, analysis: Analysis, executed: bool, unprobed: list[SymbolRef]) -> list[str]:
@@ -39,11 +43,12 @@ def _limits(impact: ImpactResult, analysis: Analysis, executed: bool, unprobed: 
         "Impact is static parser analysis: calls through variables, dynamic dispatch or class hierarchies may be missed. "
         "Unresolved references that could reach a changed symbol are listed as unknowns, not as safe.",
     ]
-    if analysis.tier in TIER_LIMITS:
-        limits.append(
-            f"Language '{analysis.language}' is supported at tier '{analysis.tier}': {TIER_LIMITS[analysis.tier]}. "
-            "Treat missing paths as unknown."
-        )
+    limits += [
+        f"Language '{support.language}' is supported at tier '{support.tier}': {TIER_LIMITS[support.tier]}. "
+        "Treat missing paths as unknown."
+        for support in analysis.languages
+        if support.tier in TIER_LIMITS
+    ]
     if executed:
         limits.append(
             "'same_on_tested_cases' means identical output for these frozen inputs only; it is not proof of equivalence."
@@ -124,8 +129,9 @@ def _summary(report: ReviewReport) -> str:
         f"{len(outside)} non-test callers outside the diff, {len(impact.unknowns)} unknowns"
     ]
     analysis = report.analysis
-    if analysis and analysis.tier != "full":
-        lines.append(f"  analyzed as {analysis.language} ({analysis.adapter}, tier {analysis.tier}) — see limits")
+    if analysis and any(support.tier != "full" for support in analysis.languages):
+        tiers = ", ".join(f"{support.language} ({support.tier})" for support in analysis.languages)
+        lines.append(f"  analyzed as {tiers} — see limits")
     lines += [f"  outside diff: {p.render()}  ({p.hops[0].path}:{p.hops[0].line})" for p in outside]
     for suite in report.tests:
         lines.append(

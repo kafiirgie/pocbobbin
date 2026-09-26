@@ -2,9 +2,6 @@ from pathlib import Path
 
 import pytest
 
-# Optional extra: without `pip install -e ".[multilang]"` these tests skip instead of failing.
-pytest.importorskip("tree_sitter_language_pack")
-
 from app.cli import pipeline
 from app.impact import analyze
 from app.snapshot import open_pair
@@ -333,7 +330,29 @@ def test_bare_call_is_not_a_sibling_method_without_implicit_receiver(
 def test_typescript_report_states_language_tier_and_its_limit(tmp_path: Path):
     report = pipeline(make_typescript_repo(tmp_path), "base", "head")
 
-    assert report.analysis.model_dump() == {
-        "language": "typescript", "adapter": "tree-sitter", "tier": "static_probe", "config_source": "behavior.json",
-    }
+    typescript = {"language": "typescript", "adapter": "tree-sitter", "tier": "static_probe"}
+    assert report.analysis.model_dump() == {**typescript, "config_source": "behavior.json", "languages": [typescript]}
     assert any("'typescript' is supported at tier 'static_probe'" in limit for limit in report.limits)
+
+def test_mixed_repository_reports_every_language_and_warns_per_weaker_tier(tmp_path: Path):
+    repo = tmp_path / "mixed"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "base")
+    write_files(repo, {
+        "behavior.json": '{"languages": ["python", "typescript"]}',
+        "pkg/core.py": "def f():\n    return 1\n",
+        "src/discount.ts": "export function applyDiscount(value: number) { return value; }\n",
+    })
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "base")
+    git(repo, "checkout", "-q", "-b", "head")
+    write_files(repo, {"pkg/core.py": "def f():\n    return 2\n"})
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "head")
+
+    report = pipeline(repo, "base", "head")
+
+    assert (report.analysis.language, report.analysis.tier) == ("python", "full")
+    assert [(s.language, s.tier) for s in report.analysis.languages] == [("python", "full"), ("typescript", "static_probe")]
+    warnings = [limit for limit in report.limits if "is supported at tier" in limit]
+    assert len(warnings) == 1 and "'typescript'" in warnings[0]

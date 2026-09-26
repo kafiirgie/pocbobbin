@@ -203,11 +203,17 @@ class Decision(Model):
 # --- Report (the one object every door consumes) ------------------------------
 
 
-class Analysis(Model):
+class LanguageSupport(Model):
     language: str
     adapter: str = Field(description="'python-ast' or 'tree-sitter'.")
     tier: str = Field(description="full | static_probe | static_cross_file | experimental (app/adapters/registry.py).")
-    config_source: str = Field(description="'behavior.json' (read from the base revision) or 'defaults'.")
+
+
+class Analysis(LanguageSupport):
+    """The primary language (runtime/test profile) plus every adapter that analyzed the change."""
+
+    config_source: str = Field(description="'behavior.json' or 'detected' (both from the base revision), or 'defaults'.")
+    languages: list[LanguageSupport] = Field(default_factory=list, description="Every analyzed language, primary first.")
 
 
 class ReviewReport(Model):

@@ -244,7 +244,7 @@ behavior-review/
 | Part | What it uses |
 |---|---|
 | Engine (required) | Python ≥ 3.11 (uses `StrEnum`), stdlib `ast`, `git` via subprocess, **Pydantic** — the only required dependency |
-| Multi-language (optional) | `tree-sitter` + `tree-sitter-language-pack`, installed with `pip install ".[multilang]"` |
+| Multi-language | `tree-sitter` + `tree-sitter-language-pack`, required since #23 (languages are auto-detected when there is no `behavior.json`) |
 | Test/probe execution | Each language's own runner, called as an argv command (pytest, Vitest, or what `behavior.json` configures) |
 | Web | React 18 + Vite + TypeScript + Tailwind v4, shadcn-style components in `web/src/components/ui/` |
 | Maps (Lane E, new) | **React Flow (`@xyflow/react`) + dagre** for layout — `TODO(C)`: approve the two dependencies in `web/package.json` |
@@ -584,7 +584,7 @@ Add `tier` to `AdapterSpec` in `app/adapters/registry.py` (values: `full`, `stat
 }
 ```
 
-A announces the change, updates `contracts/` fixtures and `tests/test_contracts.py` in the same commit (rule §10.2). `config_source` is `"behavior.json"` or `"defaults"`.
+A announces the change, updates `contracts/` fixtures and `tests/test_contracts.py` in the same commit (rule §10.2). `config_source` is `"behavior.json"`, `"detected"` (auto-detection, #23) or `"defaults"`; both the file and detection come from the base revision. **As built:** the fields above describe the primary language, and `analysis.languages` lists every adapter that ran (`language`, `adapter`, `tier`) for mixed repositories; limits warn once per language below `full`.
 
 ### 19.3 Consistency matrix
 

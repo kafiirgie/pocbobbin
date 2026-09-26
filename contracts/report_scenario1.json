@@ -16,7 +16,14 @@
     "language": "python",
     "adapter": "python-ast",
     "tier": "full",
-    "config_source": "defaults"
+    "config_source": "defaults",
+    "languages": [
+      {
+        "language": "python",
+        "adapter": "python-ast",
+        "tier": "full"
+      }
+    ]
   },
   "impact": {
     "changed_symbols": [
