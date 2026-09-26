@@ -1,4 +1,4 @@
-"""Unit tests for app.decisions (Lane D deliverables)."""
+"""Unit tests for app.decisions (Lane D deliverables) integrated with Lane A schemas."""
 
 import json
 import shutil
@@ -14,6 +14,7 @@ from app.decisions import (
     lookup,
     validate_and_save,
 )
+from app.schemas import Decision, DecisionStatus, Intent, SymbolRef
 
 
 class TestDecisionsModule(unittest.TestCase):
@@ -50,19 +51,37 @@ class TestDecisionsModule(unittest.TestCase):
             head_sha="head222",
         )
 
-        self.assertEqual(decision.intent, "intended")
-        self.assertEqual(decision.symbol, "apply_discount")
+        self.assertIsInstance(decision, Decision)
+        self.assertEqual(decision.intent, Intent.INTENDED)
+        self.assertEqual(decision.target.symbol, "apply_discount")
+        self.assertEqual(decision.target.path, "pricing/discount.py")
         self.assertEqual(decision.rationale, rationale)
-        self.assertEqual(decision.status, "proposed")
+        self.assertEqual(decision.status, DecisionStatus.PROPOSED)
 
-        # Verify file persisted
+        # Verify file persisted on disk and matches schema
         saved_file = self.repo_root / "behavior_decisions" / f"{decision.id}.json"
         self.assertTrue(saved_file.exists())
 
         loaded = load_decision_from_file(saved_file)
         self.assertEqual(loaded.id, decision.id)
-        self.assertEqual(loaded.before_behavior, 100.0)
-        self.assertEqual(loaded.after_behavior, 70.0)
+        self.assertEqual(loaded.before, 100.0)
+        self.assertEqual(loaded.after, 70.0)
+
+    def test_validate_and_save_with_target_dict_or_object(self):
+        delta = {
+            "target": {"symbol": "price_total", "path": "pricing/invoice.py"},
+            "probe_hash": "probe_xyz",
+            "before": 100.0,
+            "after": 99.99,
+        }
+        dec = validate_and_save(
+            delta=delta,
+            disposition="unintended",
+            repo_root=self.repo_root,
+        )
+        self.assertEqual(dec.target.symbol, "price_total")
+        self.assertEqual(dec.target.path, "pricing/invoice.py")
+        self.assertEqual(dec.intent, Intent.UNINTENDED)
 
     def test_validate_and_save_intended_missing_rationale_raises_error(self):
         delta = {
@@ -101,8 +120,8 @@ class TestDecisionsModule(unittest.TestCase):
             disposition="unintended",
             repo_root=self.repo_root,
         )
-        self.assertEqual(decision_unintended.intent, "unintended")
-        self.assertEqual(decision_unintended.status, "proposed")
+        self.assertEqual(decision_unintended.intent, Intent.UNINTENDED)
+        self.assertEqual(decision_unintended.status, DecisionStatus.PROPOSED)
 
         decision_unresolved = validate_and_save(
             delta=delta,
@@ -110,7 +129,7 @@ class TestDecisionsModule(unittest.TestCase):
             repo_root=self.repo_root,
             base_sha="diff_sha",
         )
-        self.assertEqual(decision_unresolved.intent, "unresolved")
+        self.assertEqual(decision_unresolved.intent, Intent.UNRESOLVED)
 
     def test_validate_and_save_invalid_disposition(self):
         delta = {"symbol": "foo", "path": "bar.py"}
@@ -168,16 +187,15 @@ class TestDecisionsModule(unittest.TestCase):
             rationale="Approved business change for holiday pricing",
             repo_root=self.repo_root,
         )
-        self.assertEqual(dec.status, "proposed")
+        self.assertEqual(dec.status, DecisionStatus.PROPOSED)
 
         approved = approve_decision(dec.id, repo_root=self.repo_root)
-        self.assertEqual(approved.status, "approved")
+        self.assertEqual(approved.status, DecisionStatus.APPROVED)
 
         reloaded = load_decision_from_file(self.repo_root / "behavior_decisions" / f"{dec.id}.json")
-        self.assertEqual(reloaded.status, "approved")
+        self.assertEqual(reloaded.status, DecisionStatus.APPROVED)
 
     def test_lookup_approved_and_superseded_records(self):
-        # Create an initial decision and approve it
         delta1 = {
             "symbol": "apply_discount",
             "path": "pricing/discount.py",
@@ -191,10 +209,9 @@ class TestDecisionsModule(unittest.TestCase):
             repo_root=self.repo_root,
             base_sha="sha_A",
             head_sha="sha_B",
-            status="approved",
+            status=DecisionStatus.APPROVED,
         )
 
-        # Lookup should find dec1 as approved
         matches = lookup(
             symbols=["apply_discount"],
             repo_root=self.repo_root,
@@ -218,14 +235,13 @@ class TestDecisionsModule(unittest.TestCase):
             repo_root=self.repo_root,
             base_sha="sha_B",
             head_sha="sha_C",
-            status="approved",
+            status=DecisionStatus.APPROVED,
         )
 
         matches_after = lookup(
             symbols=["apply_discount"],
             repo_root=self.repo_root,
         )
-        # We expect 2 matches: dec1 (now superseded) and dec2 (active approved)
         self.assertEqual(len(matches_after), 2)
         match_dec1 = next(m for m in matches_after if m.decision.id == dec1.id)
         match_dec2 = next(m for m in matches_after if m.decision.id == dec2.id)

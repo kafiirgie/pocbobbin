@@ -11,57 +11,23 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import subprocess
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
-# Attempt import from app.schemas (Lane A). Fall back to canonical definition if schemas.py is not yet merged.
-try:
-    from app.schemas import Decision, DecisionMatch  # type: ignore
-except ImportError:
+from app.schemas import Decision, DecisionStatus, Intent, SymbolRef
 
-    class Decision(BaseModel):
-        id: str = Field(description="Deterministic 12-character SHA-256 hash")
-        repo: str = Field(default="", description="Repository identifier")
-        path: str = Field(description="Relative path of file containing the symbol")
-        symbol: str = Field(description="Name of the affected function or symbol")
-        base_sha: str = Field(default="", description="Base commit SHA")
-        head_sha: str = Field(default="", description="Head commit SHA")
-        probe_hash: str = Field(default="", description="Hash of probe used for observation")
-        before_behavior: Any = Field(description="Output or behavior on base revision")
-        after_behavior: Any = Field(description="Output or behavior on head revision")
-        intent: Literal["unintended", "intended", "unresolved"] = Field(
-            description="Author disposition: unintended, intended, or unresolved"
-        )
-        rationale: Optional[str] = Field(
-            default=None,
-            description="Mandatory justification if intent is intended (>= 10 characters)",
-        )
-        requirement_ref: Optional[str] = Field(
-            default=None, description="Optional issue, ticket, or requirement reference"
-        )
-        status: Literal["proposed", "approved"] = Field(
-            default="proposed",
-            description="Proposed during branch review; approved once merged to main",
-        )
-        supersedes: Optional[str] = Field(
-            default=None, description="ID of a prior decision that this decision supersedes"
-        )
-        timestamp: str = Field(
-            default_factory=lambda: datetime.now(timezone.utc).isoformat(),
-            description="UTC ISO timestamp of the decision record",
-        )
 
-    class DecisionMatch(BaseModel):
-        symbol: str
-        decision: Decision
-        match_type: Literal["approved", "stale", "superseded"] = "approved"
-        is_stale: bool = False
-        reason: Optional[str] = None
+class DecisionMatch(BaseModel):
+    """Result of looking up prior decisions for an impacted symbol."""
+
+    symbol: str
+    decision: Decision
+    match_type: Literal["approved", "stale", "superseded"] = "approved"
+    is_stale: bool = False
+    reason: Optional[str] = None
 
 
 def generate_decision_id(
@@ -78,7 +44,7 @@ def generate_decision_id(
 
 def validate_and_save(
     delta: Union[Dict[str, Any], Any],
-    disposition: str,
+    disposition: Union[str, Intent],
     rationale: Optional[str] = None,
     *,
     repo_root: Optional[Union[Path, str]] = None,
@@ -87,14 +53,14 @@ def validate_and_save(
     head_sha: str = "",
     requirement_ref: Optional[str] = None,
     supersedes: Optional[str] = None,
-    status: Literal["proposed", "approved"] = "proposed",
+    status: Union[str, DecisionStatus] = DecisionStatus.PROPOSED,
 ) -> Decision:
     """Validate a behavior decision and record it into the behavior_decisions/ ledger.
 
     Args:
         delta: Dictionary or object containing observed difference metadata
                (symbol, path, probe_hash, before/after behavior).
-        disposition: One of 'unintended', 'intended', or 'unresolved'.
+        disposition: One of 'unintended', 'intended', or 'unresolved' (or Intent enum).
         rationale: Human-written reason for change. Mandatory when disposition is 'intended'.
         repo_root: Root directory of repository. Defaults to cwd.
         repo: Repository identifier.
@@ -102,10 +68,10 @@ def validate_and_save(
         head_sha: Head commit SHA.
         requirement_ref: Optional requirement/issue reference.
         supersedes: Explicit ID of previous decision being superseded.
-        status: 'proposed' (default) or 'approved'.
+        status: DecisionStatus.PROPOSED (default) or DecisionStatus.APPROVED.
 
     Returns:
-        The validated and persisted Decision instance.
+        The validated and persisted Decision instance from app.schemas.
 
     Raises:
         ValueError: If disposition is invalid, rationale is missing for intended changes,
@@ -115,25 +81,50 @@ def validate_and_save(
     ledger_dir = root_path / "behavior_decisions"
     ledger_dir.mkdir(parents=True, exist_ok=True)
 
-    # Normalize disposition
-    normalized_disp = disposition.strip().lower()
-    if normalized_disp not in {"unintended", "intended", "unresolved"}:
-        raise ValueError(
-            f"Invalid disposition '{disposition}'. Must be one of: 'unintended', 'intended', 'unresolved'."
-        )
+    # Normalize disposition to Intent
+    if isinstance(disposition, Intent):
+        intent = disposition
+    else:
+        norm_disp = disposition.strip().lower()
+        try:
+            intent = Intent(norm_disp)
+        except ValueError:
+            raise ValueError(
+                f"Invalid disposition '{disposition}'. Must be one of: 'unintended', 'intended', 'unresolved'."
+            )
 
     # Validate rationale for intended changes
     clean_rationale = rationale.strip() if rationale else None
-    if normalized_disp == "intended":
+    if intent == Intent.INTENDED:
         if not clean_rationale or len(clean_rationale) < 10:
             raise ValueError(
                 "A rationale of at least 10 characters is strictly required for intended behavior changes."
             )
 
+    # Normalize status to DecisionStatus
+    if isinstance(status, DecisionStatus):
+        dec_status = status
+    else:
+        norm_status = status.strip().lower()
+        try:
+            dec_status = DecisionStatus(norm_status)
+        except ValueError:
+            dec_status = DecisionStatus.PROPOSED
+
     # Extract delta properties
+    target_obj = None
     if isinstance(delta, dict):
-        symbol = delta.get("symbol") or delta.get("symbol_name") or ""
-        path = delta.get("path") or delta.get("file_path") or ""
+        target_obj = delta.get("target")
+        if isinstance(target_obj, dict):
+            symbol = target_obj.get("symbol", "")
+            path = target_obj.get("path", "")
+        elif isinstance(target_obj, SymbolRef):
+            symbol = target_obj.symbol
+            path = target_obj.path
+        else:
+            symbol = delta.get("symbol") or delta.get("symbol_name") or ""
+            path = delta.get("path") or delta.get("file_path") or ""
+
         probe_hash = delta.get("probe_hash") or ""
         before_behavior = delta.get("before") if "before" in delta else delta.get("before_behavior")
         after_behavior = delta.get("after") if "after" in delta else delta.get("after_behavior")
@@ -145,8 +136,17 @@ def validate_and_save(
         base_sha = base_sha or delta.get("base_sha", "")
         head_sha = head_sha or delta.get("head_sha", "")
     else:
-        symbol = getattr(delta, "symbol", getattr(delta, "symbol_name", ""))
-        path = getattr(delta, "path", getattr(delta, "file_path", ""))
+        target_obj = getattr(delta, "target", None)
+        if isinstance(target_obj, SymbolRef):
+            symbol = target_obj.symbol
+            path = target_obj.path
+        elif isinstance(target_obj, dict):
+            symbol = target_obj.get("symbol", "")
+            path = target_obj.get("path", "")
+        else:
+            symbol = getattr(delta, "symbol", getattr(delta, "symbol_name", ""))
+            path = getattr(delta, "path", getattr(delta, "file_path", ""))
+
         probe_hash = getattr(delta, "probe_hash", "")
         before_behavior = getattr(delta, "before", getattr(delta, "before_behavior", getattr(delta, "base_output", None)))
         after_behavior = getattr(delta, "after", getattr(delta, "after_behavior", getattr(delta, "head_output", None)))
@@ -159,42 +159,40 @@ def validate_and_save(
     if not path:
         raise ValueError("Cannot record decision without an affected file path.")
 
-    # Check for automatic supersedes if not provided
+    # Check for automatic supersedes if not explicitly provided
     auto_supersedes = supersedes
     if auto_supersedes is None:
         prior_decisions = load_all_decisions(ledger_dir)
         matching = [
             d for d in prior_decisions
-            if d.symbol == symbol and d.path == path
+            if d.target.symbol == symbol and d.target.path == path
         ]
         if matching:
-            # Sort by timestamp, grab most recent
-            matching.sort(key=lambda d: d.timestamp, reverse=True)
-            auto_supersedes = matching[0].id
+            # Most recent decision ID
+            auto_supersedes = matching[-1].id
 
     decision_id = generate_decision_id(repo, symbol, base_sha, head_sha, probe_hash)
+    target = SymbolRef(path=path, symbol=symbol)
 
     decision = Decision(
         id=decision_id,
         repo=repo,
-        path=path,
-        symbol=symbol,
+        target=target,
         base_sha=base_sha,
         head_sha=head_sha,
         probe_hash=probe_hash,
-        before_behavior=before_behavior,
-        after_behavior=after_behavior,
-        intent=normalized_disp,  # type: ignore
+        before=before_behavior,
+        after=after_behavior,
+        intent=intent,
         rationale=clean_rationale,
         requirement_ref=requirement_ref,
-        status=status,
+        status=dec_status,
         supersedes=auto_supersedes,
-        timestamp=datetime.now(timezone.utc).isoformat(),
     )
 
     # Persist decision JSON
     target_file = ledger_dir / f"{decision_id}.json"
-    target_file.write_text(decision.model_dump_json(indent=2), encoding="utf-8")
+    target_file.write_text(decision.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
     return decision
 
@@ -234,7 +232,6 @@ def load_branch_decisions_via_git(
     decisions: List[Decision] = []
 
     try:
-        # List files in behavior_decisions on branch
         cmd_ls = ["git", "ls-tree", "-r", "--name-only", branch, "behavior_decisions/"]
         res_ls = subprocess.run(
             cmd_ls, cwd=root, capture_output=True, text=True, check=True
@@ -249,7 +246,6 @@ def load_branch_decisions_via_git(
             data = json.loads(res_show.stdout)
             decisions.append(Decision.model_validate(data))
     except Exception:
-        # Fall back to local ledger files if git command is unavailable or branch does not exist yet
         pass
 
     return decisions
@@ -286,21 +282,21 @@ def lookup(
             # Fall back to local directory records that are approved or present
             ledger_dir = root_path / "behavior_decisions"
             all_local = load_all_decisions(ledger_dir)
-            records = [d for d in all_local if d.status == "approved"] or all_local
+            records = [d for d in all_local if d.status == DecisionStatus.APPROVED] or all_local
 
-    # Build set of superseded IDs to detect superseded records
     superseded_ids = {d.supersedes for d in records if d.supersedes}
 
     matches: List[DecisionMatch] = []
     symbol_set = set(symbols)
 
     for record in records:
-        if record.symbol in symbol_set:
+        sym_name = record.target.symbol
+        if sym_name in symbol_set:
             is_superseded = record.id in superseded_ids
             if is_superseded:
                 matches.append(
                     DecisionMatch(
-                        symbol=record.symbol,
+                        symbol=sym_name,
                         decision=record,
                         match_type="superseded",
                         is_stale=True,
@@ -308,13 +304,14 @@ def lookup(
                     )
                 )
             else:
+                is_approved = record.status == DecisionStatus.APPROVED
                 matches.append(
                     DecisionMatch(
-                        symbol=record.symbol,
+                        symbol=sym_name,
                         decision=record,
-                        match_type="approved" if record.status == "approved" else "stale",
-                        is_stale=record.status != "approved",
-                        reason=None if record.status == "approved" else "Decision is proposed but not yet approved on main.",
+                        match_type="approved" if is_approved else "stale",
+                        is_stale=not is_approved,
+                        reason=None if is_approved else "Decision is proposed but not yet approved on main.",
                     )
                 )
 
@@ -329,6 +326,6 @@ def approve_decision(
     root_path = Path(repo_root) if repo_root else Path.cwd()
     file_path = root_path / "behavior_decisions" / f"{decision_id}.json"
     decision = load_decision_from_file(file_path)
-    updated = decision.model_copy(update={"status": "approved"})
-    file_path.write_text(updated.model_dump_json(indent=2), encoding="utf-8")
+    updated = decision.model_copy(update={"status": DecisionStatus.APPROVED})
+    file_path.write_text(updated.model_dump_json(indent=2) + "\n", encoding="utf-8")
     return updated
