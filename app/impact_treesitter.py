@@ -530,7 +530,13 @@ def _callee_parts(callee: str) -> tuple[str, str | None]:
     return (match.group(1), match.group(2)) if match else (callee, None)
 
 
-def _resolve_call(module: Module, call: CallRef, modules: dict[str, Module]) -> tuple[SymbolRef | None, str]:
+# Languages where a bare `f()` inside a method means `this.f()`. In PHP, TS/JS and Rust a bare
+# call names a free function, so resolving it to a sibling method would draw an edge that doesn't exist.
+IMPLICIT_RECEIVER_LANGUAGES = {"java", "csharp", "kotlin", "swift", "dart", "cpp", "ruby"}
+SELF_RECEIVERS = {"this", "self", "base", "super", "$this", "static"}
+
+
+def _resolve_call(module: Module, call: CallRef, modules: dict[str, Module], language: str) -> tuple[SymbolRef | None, str]:
     name, member = _callee_parts(call.callee)
     if member and name in module.namespaces:
         target_path = module.namespaces[name]
@@ -549,10 +555,10 @@ def _resolve_call(module: Module, call: CallRef, modules: dict[str, Module]) -> 
         return SymbolRef(path=module.path, symbol=name), ""
 
     owner = call.caller.rsplit(".", 1)[0] if "." in call.caller else None
-    if not member and owner and f"{owner}.{name}" in module.symbols:
+    if not member and owner and language in IMPLICIT_RECEIVER_LANGUAGES and f"{owner}.{name}" in module.symbols:
         return SymbolRef(path=module.path, symbol=f"{owner}.{name}"), ""
 
-    if member and name in {"this", "self", "base", "super"}:
+    if member and name in SELF_RECEIVERS:
         candidate = f"{owner}.{member}" if owner else member
         if candidate in module.symbols:
             return SymbolRef(path=module.path, symbol=candidate), ""
@@ -567,7 +573,7 @@ def _changed_by_name(changed: list[ChangedSymbol]) -> dict[str, list[str]]:
     return dict(result)
 
 
-def _scan(modules: dict[str, Module], revision: Revision, changed_by_name: dict[str, list[str]]) -> tuple[dict[tuple[str, str], Edge], list[Unknown]]:
+def _scan(modules: dict[str, Module], revision: Revision, changed_by_name: dict[str, list[str]], language: str) -> tuple[dict[tuple[str, str], Edge], list[Unknown]]:
     edges: dict[tuple[str, str], Edge] = {}
     unknowns: list[Unknown] = []
     for module in modules.values():
@@ -576,7 +582,7 @@ def _scan(modules: dict[str, Module], revision: Revision, changed_by_name: dict[
                 unknowns.append(Unknown(path=module.path, line=1, symbol=MODULE, expression="", reason=f"could not parse on {revision.value}: {module.error}"))
             continue
         for call in module.calls:
-            callee, reason = _resolve_call(module, call, modules)
+            callee, reason = _resolve_call(module, call, modules, language)
             caller = SymbolRef(path=module.path, symbol=call.caller)
             if callee is not None and callee.key != caller.key:
                 key = (caller.key, callee.key)
@@ -693,8 +699,8 @@ def analyze(pair: RevisionPair, max_hops: int, config: BehaviorConfig) -> Impact
     _bind_imports(head, config)
     changed = _diff(base, head, pair.revisions.changed_files, config)
     changed_by_name = _changed_by_name(changed)
-    base_edges, base_unknowns = _scan(base, Revision.BASE, changed_by_name)
-    head_edges, head_unknowns = _scan(head, Revision.HEAD, changed_by_name)
+    base_edges, base_unknowns = _scan(base, Revision.BASE, changed_by_name, config.language)
+    head_edges, head_unknowns = _scan(head, Revision.HEAD, changed_by_name, config.language)
     edges = _merge_edges(base_edges, head_edges)
     paths = _impact_paths(changed, edges, pair.revisions.changed_files, max_hops, config)
     return ImpactResult(

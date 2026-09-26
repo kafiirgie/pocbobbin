@@ -20,6 +20,9 @@ class AdapterSpec:
     language: str
     grammar: str | None
     kind: str
+    # The one place a language's support tier lives (FINAL_PLAN §17, §19.1); the report,
+    # limits text, maps and README all read it from here.
+    tier: str
 
 
 class LanguageAdapter:
@@ -31,7 +34,7 @@ class LanguageAdapter:
 
 class PythonAdapter(LanguageAdapter):
     def __init__(self) -> None:
-        self.spec = AdapterSpec("python", None, "python-ast")
+        self.spec = AdapterSpec("python", None, "python-ast", "full")
 
     def analyze(self, pair, max_hops, config):
         # Lazy import avoids a module cycle: app.impact owns the historical
@@ -42,8 +45,8 @@ class PythonAdapter(LanguageAdapter):
 
 
 class TreeSitterAdapter(LanguageAdapter):
-    def __init__(self, language: str, grammar: str) -> None:
-        self.spec = AdapterSpec(language, grammar, "tree-sitter")
+    def __init__(self, language: str, grammar: str, tier: str) -> None:
+        self.spec = AdapterSpec(language, grammar, "tree-sitter", tier)
 
     def analyze(self, pair, max_hops, config):
         from app.impact_treesitter import analyze
@@ -51,25 +54,36 @@ class TreeSitterAdapter(LanguageAdapter):
         return analyze(pair, max_hops, config)
 
 
+TIERS = ("full", "static_probe", "static_cross_file", "experimental")
+
+# Plain-language warning added to a report's limits for every tier below "full".
+TIER_LIMITS = {
+    "static_probe": "static cross-file impact plus a probe harness; no end-to-end behavior run is verified "
+                    "for this language yet",
+    "static_cross_file": "static cross-file impact only; test and probe results depend on the configured "
+                         "toolchain and are not verified for this language",
+    "experimental": "experimental: same-file callers only, and name-based matching can miss or invent edges",
+}
+
 ADAPTERS: dict[str, LanguageAdapter] = {
     "python": PythonAdapter(),
     **{
-        language: TreeSitterAdapter(language, grammar)
-        for language, grammar in {
-            "typescript": "typescript",
-            "javascript": "javascript",
-            "java": "java",
-            "csharp": "csharp",
-            "go": "go",
-            "cpp": "cpp",
-            "c": "c",
-            "rust": "rust",
-            "php": "php",
-            "kotlin": "kotlin",
-            "ruby": "ruby",
-            "swift": "swift",
-            "dart": "dart",
-            "bash": "bash",
+        language: TreeSitterAdapter(language, grammar, tier)
+        for language, (grammar, tier) in {
+            "typescript": ("typescript", "static_probe"),
+            "javascript": ("javascript", "static_probe"),
+            "java": ("java", "static_cross_file"),
+            "csharp": ("csharp", "static_cross_file"),
+            "go": ("go", "static_cross_file"),
+            "cpp": ("cpp", "experimental"),
+            "c": ("c", "experimental"),
+            "rust": ("rust", "experimental"),
+            "php": ("php", "experimental"),
+            "kotlin": ("kotlin", "experimental"),
+            "ruby": ("ruby", "experimental"),
+            "swift": ("swift", "experimental"),
+            "dart": ("dart", "experimental"),
+            "bash": ("bash", "experimental"),
         }.items()
     },
 }
@@ -86,4 +100,4 @@ def registered_languages() -> tuple[str, ...]:
     return tuple(sorted(ADAPTERS))
 
 
-__all__ = ["ADAPTERS", "AdapterSpec", "LanguageAdapter", "get_adapter", "registered_languages"]
+__all__ = ["ADAPTERS", "TIERS", "TIER_LIMITS", "AdapterSpec", "LanguageAdapter", "get_adapter", "registered_languages"]

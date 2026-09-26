@@ -275,7 +275,7 @@ def _auto_detect_config(root: Path) -> "BehaviorConfig":
     if not languages:
         # Preserve the established behavior for empty/legacy Python repositories.
         return BehaviorConfig()
-    return BehaviorConfig.from_mapping({"languages": list(languages)})
+    return replace(BehaviorConfig.from_mapping({"languages": list(languages)}), source="detected")
 
 
 @dataclass(frozen=True)
@@ -291,6 +291,7 @@ class BehaviorConfig:
     test_file_patterns: tuple[str, ...] = ("test_*.py", "*_test.py", "conftest.py")
     max_hops: int = 2
     append_tests: bool = True
+    source: str = "defaults"  # "defaults", "detected" (no config file), or the config file name
     extra: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -403,7 +404,24 @@ def load_config(repo: str | Path, filename: str = "behavior.json") -> BehaviorCo
         raise ConfigError(f"cannot read {filename}: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise ConfigError(f"invalid JSON in {filename}: {exc.msg} at line {exc.lineno}") from exc
-    return BehaviorConfig.from_mapping(value)
+    return replace(BehaviorConfig.from_mapping(value), source=filename)
 
 
-__all__ = ["BehaviorConfig", "ConfigError", "load_config"]
+def load_revision_config(
+    base_path: str | Path, head_path: str | Path, filename: str = "behavior.json"
+) -> tuple[BehaviorConfig, list[str]]:
+    """The base revision's configuration, plus a note when the change edits it.
+
+    Like the frozen test suite and probes, configuration comes from the base
+    revision: a change must not be able to pick its own test command or scope.
+    """
+    base_file, head_file = Path(base_path) / filename, Path(head_path) / filename
+    base_bytes = base_file.read_bytes() if base_file.exists() else None
+    head_bytes = head_file.read_bytes() if head_file.exists() else None
+    notes = []
+    if base_bytes != head_bytes:
+        notes.append(f"{filename} differs in this change; the base revision's configuration was used.")
+    return load_config(base_path, filename), notes
+
+
+__all__ = ["BehaviorConfig", "ConfigError", "load_config", "load_revision_config"]

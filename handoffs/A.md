@@ -21,17 +21,25 @@
   D's `decisions.lookup` (matched on path + symbol, superseded ones relabeled), then with `run` B's
   `runner.compare(pair, impact=impact)`. CLI: `--base --head --max-hops --run --prior-report --json --markdown`
   (`--markdown` uses C's `report.render_markdown`).
-- `contracts/report_scenario1.json` — generated from a real `--run` of scenario 1, labeled fixture.
+- `contracts/report_scenario1.json` — generated from a real `--run` of scenario 1, labeled fixture,
+  with `analysis` (python / python-ast / full / defaults).
+- Multi-language (from #22, now A's): `app/adapters/registry.py` holds each language's support tier
+  (`AdapterSpec.tier`, `TIER_LIMITS`); `pipeline` fills `report.analysis` and adds a tier warning to
+  limits below `full`. `behavior.json` is read from the **base** revision (`config.load_revision_config`),
+  with a limits note when the change edits it. Tree-sitter: a bare call resolves to a sibling method only
+  in implicit-receiver languages (Java, C#, Kotlin, Swift, Dart, C++, Ruby); PHP `$this->`/`static::` resolve.
 
 ## Checks run
-`pytest -q` → 57 passed on Windows (whole suite, all lanes).
+`pytest -q` → 114 passed with `.[dev,multilang]`; 93 passed + tree-sitter module skipped in a fresh
+non-editable `pip install ".[dev]"` (which also proves `app.adapters` is packaged).
 `behavior-review --base ref/base --head origin/scenario1-head --run` → tests 6/6 green on both sides,
 `price_total` (invoice.py:25) outside the diff, `delta_observed` 100.0 → 99.99, cites decision
 `951cc25e49ee`. On lane C's merge range, unknowns dropped from 35 to 7 after the local-name fix,
 with identical paths and callers.
 
 ## Next
-- Sync 2: tag a demo-ready commit once C's viewer shows a real report.
+- PR 4 (with E's repo map): `TODO(A)-1` `map` subcommand and `TODO(A)-2` public import API.
+- Sync 2: tag a demo-ready commit.
 - After 14:00: check every technical claim in the video and statements against real runs.
 
 ## Blockers

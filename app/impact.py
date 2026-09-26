@@ -488,7 +488,7 @@ def analyze(
     does not need Tree-sitter installed.
     """
 
-    settings = config or load_config(pair.root)
+    settings = config or load_config(pair.base_path)
     effective_hops = settings.max_hops if max_hops is None else max_hops
     if len(settings.languages) == 1:
         adapter = get_adapter(settings.language)

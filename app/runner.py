@@ -465,7 +465,7 @@ def compare(pair, bundle=None, python: str | None = None, probes_dir: str = PROB
     whose recorded hash differs is a different probe and is not linked.
     """
     python = python or sys.executable
-    settings = config or load_config(pair.root)
+    settings = config or load_config(pair.base_path)
     if tests_rel == TESTS_DIR:
         tests_rel = settings.tests_dir
     base_wt, head_wt = Path(pair.base_path), Path(pair.head_path)

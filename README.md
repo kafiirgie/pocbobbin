@@ -149,26 +149,30 @@ approve nothing.
 pytest -q
 ```
 
-### Optional multi-language analysis
+## Language support
 
 The CLI auto-detects supported languages from repository manifests and source extensions. A
 missing `behavior.json` selects one or more static adapters; a mixed repository is analyzed by
 each detected adapter and the evidence is merged. Python remains the fallback only when no
 language evidence is detectable. Explicit `behavior.json` always wins and is recommended when a
-repository has a custom test/probe toolchain.
+repository has a custom test/probe toolchain. Tree-sitter is installed with the package because
+detection may select a non-Python adapter.
 
-Tree-sitter is installed with the package because automatic detection may select a non-Python
-adapter. For development, install the test tools as well:
+Each language has one support tier, declared in `app/adapters/registry.py`. Every report states
+the languages analyzed and their tiers under `analysis`, and adds a warning to `limits` for any
+language below `full`.
 
-```bash
-pip install -e ".[dev]"
-```
+| Tier | Languages | What is verified today |
+|---|---|---|
+| `full` | Python | Cross-file impact, paired execution, the real demo scenarios end to end |
+| `static_probe` | TypeScript, JavaScript | Cross-file impact and unknowns; a TS probe harness and Vitest parser exist, no real end-to-end run yet |
+| `static_cross_file` | Java, C#, Go | Cross-file caller resolution (tested) |
+| `experimental` | C, C++, Rust, PHP, Kotlin, Ruby, Swift, Dart, Bash | Same-file callers only; name-based matching can miss or invent edges |
 
-The adapter registry currently accepts Python, TypeScript, JavaScript, Java, C#, Go, C++, C,
-Rust, PHP, Kotlin, Ruby, Swift, Dart, and Bash. Full support for a language still requires a
-real repository/toolchain fixture and process-output verification in CI. Add `behavior.json` at
-the repository root when you need to override detection, select a primary test profile, or
-provide real test/probe commands. Commands are argument arrays, not shell strings:
+Add `behavior.json` at the repository root to override detection, select a primary test profile,
+or provide real test/probe commands. Like the frozen tests and probes, it is read from (and
+detection runs on) the **base** revision, so a change cannot pick its own test command; if the
+change edits it, the report says so. Commands are argument arrays, not shell strings:
 
 ```json
 {
