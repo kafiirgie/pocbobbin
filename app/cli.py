@@ -10,9 +10,10 @@ import json
 import sys
 from pathlib import Path
 
+from app.decisions import lookup
 from app.impact import analyze
 from app.runner import compare
-from app.schemas import ImpactResult, ReviewReport, SymbolRef
+from app.schemas import Decision, DecisionStatus, ImpactResult, ReviewReport, RevisionPair, SymbolRef
 from app.snapshot import SnapshotError, open_pair
 
 
@@ -36,13 +37,28 @@ def _limits(impact: ImpactResult, executed: bool, unprobed: list[SymbolRef]) -> 
     return limits
 
 
+def _prior_decisions(pair: RevisionPair, impact: ImpactResult) -> list[Decision]:
+    """Ledger records at the base revision for any changed or impacted symbol.
+
+    Matches on path + symbol, not the bare name `lookup` keys on, so a same-named
+    function in another file never borrows a decision. Superseded records stay
+    visible but are relabeled so nobody cites them as current.
+    """
+    refs = {c.key: c for c in impact.changed_symbols} | {h.key: h for p in impact.paths for h in p.hops}
+    matches = lookup(sorted({r.symbol for r in refs.values()}), repo_root=pair.root, branch=pair.revisions.base_sha)
+    return [
+        m.decision.model_copy(update={"status": DecisionStatus.SUPERSEDED}) if m.match_type == "superseded" else m.decision
+        for m in matches
+        if m.decision.target.key in refs
+    ]
+
+
 def pipeline(repo: str | Path, base: str, head: str, max_hops: int = 2, run: bool = False) -> ReviewReport:
-    """Snapshot → impact → (with `run`) paired execution of the frozen suite and committed probes."""
+    """Snapshot → impact → prior decisions → (with `run`) paired execution of the frozen suite and probes."""
     with open_pair(repo, base, head) as pair:
         impact = analyze(pair, max_hops)
-        if not run:
-            return ReviewReport(repo=pair.repo, revisions=pair.revisions, impact=impact, limits=_limits(impact, False, []))
-        suites, comparisons, missing, notes = compare(pair, impact=impact)
+        prior = _prior_decisions(pair, impact)
+        suites, comparisons, missing, notes = compare(pair, impact=impact) if run else ([], [], [], [])
     return ReviewReport(
         repo=pair.repo,
         revisions=pair.revisions,
@@ -50,6 +66,7 @@ def pipeline(repo: str | Path, base: str, head: str, max_hops: int = 2, run: boo
         tests=suites,
         comparisons=comparisons,
         needs_bob_action=missing,
+        prior_decisions=prior,
         limits=_limits(impact, bool(suites or comparisons), missing) + notes,
     )
 
@@ -90,6 +107,9 @@ def _summary(report: ReviewReport) -> str:
             "  needs Bob action (no committed probe): "
             + ", ".join(ref.key for ref in report.needs_bob_action)
         )
+    for d in report.prior_decisions:
+        lines.append(f"  prior decision {d.id} ({d.status}) on {d.target.key}: {d.intent}"
+                     + (f" — {d.rationale}" if d.rationale else ""))
     return "\n".join(lines)
 
 
