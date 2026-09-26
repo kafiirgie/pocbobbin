@@ -82,10 +82,15 @@ function FileZone({ spec, view, onPick }: { spec: ZoneSpec; view: ZoneView; onPi
     onPick(event.dataTransfer.files[0] ?? null);
   };
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <div className="flex min-h-6 items-center justify-between gap-2">
         <p id={`${spec.id}-title`} className="text-sm font-medium">
-          {spec.title} <span className="font-normal text-muted-foreground">({spec.optional ? "optional" : "required"})</span>
+          {spec.title}{" "}
+          {spec.optional ? (
+            <span className="font-normal text-muted-foreground">(optional)</span>
+          ) : (
+            <><span aria-hidden="true" className="text-danger">*</span><span className="sr-only">(required)</span></>
+          )}
         </p>
         {view.tone === "empty" ? null : <Button variant="ghost" size="xs" onClick={() => onPick(null)}>Remove</Button>}
       </div>
@@ -94,7 +99,7 @@ function FileZone({ spec, view, onPick }: { spec: ZoneSpec; view: ZoneView; onPi
         onDragLeave={() => setOver(false)}
         onDrop={drop}
         className={cn(
-          "flex cursor-pointer flex-col items-center gap-2 rounded-md border-2 border-dashed p-4 text-center text-sm text-muted-foreground",
+          "flex min-h-36 flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed p-4 text-center text-sm text-muted-foreground",
           "has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50",
           view.tone === "error" && TONE_CLASSES.danger,
           view.tone === "ok" && TONE_CLASSES.success,
@@ -140,13 +145,15 @@ export function OpenReportDialog({ onOpen }: { onOpen: (opened: OpenedReport) =>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm"><FolderOpen aria-hidden="true" />Open report…</Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Open a behavior-review run</DialogTitle>
           <DialogDescription>Files are read in this browser and never uploaded. Reloading returns to the shipped report.</DialogDescription>
         </DialogHeader>
-        <FileZone spec={REPORT_ZONE} view={viewOf(report, summarizeReport)} onPick={pickReport} />
-        <FileZone spec={MAP_ZONE} view={viewOf(map, summarizeMap, mismatch)} onPick={pickMap} />
+        <div className="grid gap-6 sm:grid-cols-2">
+          <FileZone spec={REPORT_ZONE} view={viewOf(report, summarizeReport)} onPick={pickReport} />
+          <FileZone spec={MAP_ZONE} view={viewOf(map, summarizeMap, mismatch)} onPick={pickMap} />
+        </div>
         <DialogFooter>
           <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
           <Button onClick={submit} disabled={report.status !== "ready" || !mapUsable}>Open</Button>
