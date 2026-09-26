@@ -103,6 +103,16 @@ class Unknown(Model):
     may_reach: list[str] = Field(default_factory=list, description="Changed symbol keys this might reach.")
 
 
+class ImportRef(Model):
+    """One import statement, resolved to a repository file when that can be done statically."""
+
+    source: str = Field(description="Repo-relative path of the importing file.")
+    target: str | None = Field(description="Repo-relative path it resolves to; None when it can't be resolved.")
+    line: int
+    expression: str
+    reason: str = Field(default="", description="Why `target` is None; empty for a resolved import.")
+
+
 class ImpactResult(Model):
     changed_symbols: list[ChangedSymbol]
     edges: list[Edge]

@@ -49,12 +49,17 @@ jobs:
               --json report.json
           fi
 
+      - name: Build Repo Map
+        run: python -m app.cli map --ref HEAD --out repo_map.json
+
       - name: Upload Review Artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: behavior-review-report
-          path: report.json
+          path: |
+            report.json
+            repo_map.json
           if-no-files-found: ignore
 
       - name: Post or Update PR Comment

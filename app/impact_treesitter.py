@@ -8,6 +8,7 @@ Anything that could reach a changed symbol but cannot be resolved is emitted as
 from __future__ import annotations
 
 import fnmatch
+import posixpath
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -22,6 +23,7 @@ from app.schemas import (
     ImpactPath,
     ImpactResult,
     Revision,
+    ImportRef,
     RevisionPair,
     SymbolRef,
     Unknown,
@@ -104,6 +106,7 @@ class ImportSpec:
     imported: str
     source: str
     namespace: bool = False
+    line: int = 0
 
 
 @dataclass(frozen=True)
@@ -339,7 +342,7 @@ def _collect(module: Module, root, language: str) -> None:
             return
         if node_type in IMPORT_TYPES or node_type in {"preproc_def", "include_expression"}:
             for local, imported, source, namespace in _parse_language_imports(_text(node), language):
-                module.imports.append(ImportSpec(local, imported, source, namespace))
+                module.imports.append(ImportSpec(local, imported, source, namespace, _line(node)))
             return
 
         if node_type == "export_statement":
@@ -350,7 +353,7 @@ def _collect(module: Module, root, language: str) -> None:
                 source = _source_spec(_text(node))
                 if source:
                     for local, imported, namespace in _parse_imports(_text(node)):
-                        module.imports.append(ImportSpec(local, imported, source, namespace))
+                        module.imports.append(ImportSpec(local, imported, source, namespace, _line(node)))
             return
 
         if node_type in CLASS_TYPES:
@@ -470,7 +473,8 @@ def _resolve_import(source_path: str, specifier: str, modules: dict[str, Module]
     candidates: list[str] = []
 
     if raw_specifier.startswith("."):
-        raw = PurePosixPath(source_path).parent / raw_specifier
+        # normpath collapses "../": without it "src/components/../lib/x" matches no file.
+        raw = PurePosixPath(posixpath.normpath((PurePosixPath(source_path).parent / raw_specifier).as_posix()))
         candidates.extend([raw.as_posix(), raw.as_posix().lstrip("./")])
     elif config.language in {"typescript", "javascript"}:
         return None
@@ -712,4 +716,25 @@ def analyze(pair: RevisionPair, max_hops: int, config: BehaviorConfig) -> Impact
     )
 
 
-__all__ = ["analyze"]
+def import_graph(root: Path, config: BehaviorConfig) -> tuple[list[str], list[ImportRef]]:
+    """Modules of one configured language under `root` and their resolved imports (repo map, FINAL_PLAN §16.3).
+
+    A relative import that resolves to no file is reported; a bare package name is an external
+    dependency and is left out.
+    """
+    modules = _load_codebase(root, config)
+    refs: list[ImportRef] = []
+    for module in modules.values():
+        # One record per statement: `import { a, b } from "./x"` yields an ImportSpec per name.
+        for source, line in dict.fromkeys((item.source, item.line) for item in module.imports):
+            target = _resolve_import(module.path, source, modules, config)
+            if target == module.path or (target is None and not source.startswith(".")):
+                continue
+            refs.append(ImportRef(
+                source=module.path, target=target, line=line, expression=source,
+                reason="" if target else "unresolved relative import",
+            ))
+    return list(modules), refs
+
+
+__all__ = ["analyze", "import_graph"]

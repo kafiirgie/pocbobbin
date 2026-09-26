@@ -14,6 +14,7 @@ from app.adapters.registry import TIER_LIMITS, get_adapter
 from app.config import BehaviorConfig, ConfigError, load_revision_config
 from app.decisions import lookup
 from app.impact import analyze
+from app.repo_map import build as build_repo_map
 from app.report import render_markdown
 from app.runner import compare
 from app.schemas import (
@@ -200,10 +201,34 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def map_main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="behavior-review map",
+        description="Write a whole-repository module map: files, their imports, and each file's last commit/PR.",
+    )
+    parser.add_argument("--repo", default=".", help="Path inside the git repository (default: .)")
+    parser.add_argument("--ref", default="HEAD", help="Revision to map (default: HEAD)")
+    parser.add_argument("--out", type=Path, default=Path("repo_map.json"), help="Output file (default: repo_map.json)")
+    args = parser.parse_args(argv)
+    try:
+        with open_pair(args.repo, args.ref, args.ref) as pair:
+            repo_map = build_repo_map(Path(pair.head_path), Path(pair.root), pair.repo, pair.revisions.head_sha)
+    except (SnapshotError, ConfigError, RuntimeError) as exc:
+        print(f"behavior-review map: {exc}", file=sys.stderr)
+        return 2
+    args.out.write_text(repo_map.model_dump_json(indent=2, by_alias=True) + "\n", encoding="utf-8")
+    print(f"{repo_map.sha[:7]}: {len(repo_map.modules)} modules, {len(repo_map.edges)} import edges, "
+          f"{len(repo_map.unknowns)} unknowns -> {args.out}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    argv = sys.argv[1:] if argv is None else argv
     # Windows pipes default to the ANSI codepage, which can't encode the "→" in impact paths.
     sys.stdout.reconfigure(encoding="utf-8")
+    if argv[:1] == ["map"]:
+        return map_main(argv[1:])
+    args = _parser().parse_args(argv)
 
     try:
         report = pipeline(args.repo, args.base, args.head, args.max_hops, run=args.run,
