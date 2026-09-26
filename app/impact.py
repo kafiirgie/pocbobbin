@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from importlib.util import resolve_name
 from pathlib import Path, PurePosixPath
 
+from app.config import BehaviorConfig, load_config
 from app.schemas import (
     ChangedSymbol,
     ChangeTag,
@@ -387,7 +388,7 @@ def _dedupe_unknowns(unknowns: list[Unknown]) -> list[Unknown]:
     return sorted(seen.values(), key=lambda u: (u.path, u.line))
 
 
-def analyze(pair: RevisionPair, max_hops: int = 2) -> ImpactResult:
+def _analyze_python(pair: RevisionPair, max_hops: int = 2) -> ImpactResult:
     base, head = Codebase(Path(pair.base_path)), Codebase(Path(pair.head_path))
     changed_files = pair.revisions.changed_files
     changed = _diff(base, head, changed_files)
@@ -403,3 +404,25 @@ def analyze(pair: RevisionPair, max_hops: int = 2) -> ImpactResult:
         unknowns=_dedupe_unknowns(base_unknowns + head_unknowns),
         max_hops=max_hops,
     )
+
+
+def analyze(
+    pair: RevisionPair,
+    max_hops: int | None = None,
+    config: BehaviorConfig | None = None,
+) -> ImpactResult:
+    """Dispatch static analysis without changing the Python default path.
+
+    The existing Python AST implementation remains in this module and is
+    exercised unchanged when no ``behavior.json`` opts into another language.
+    Language-specific adapters are loaded lazily so a normal Python install
+    does not need Tree-sitter installed.
+    """
+
+    settings = config or load_config(pair.root)
+    effective_hops = settings.max_hops if max_hops is None else max_hops
+    if settings.language == "python":
+        return _analyze_python(pair, effective_hops)
+    from app.impact_treesitter import analyze as analyze_treesitter
+
+    return analyze_treesitter(pair, effective_hops, settings)

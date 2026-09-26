@@ -73,3 +73,33 @@ treated as safe.
 ```bash
 pytest -q
 ```
+
+### Optional TypeScript/JavaScript analysis
+
+Python remains the default and requires no configuration file. A repository can opt into the
+Tree-sitter adapter with the optional dependencies:
+
+```bash
+pip install -e ".[dev,multilang]"
+```
+
+Add `behavior.json` at the repository root to select the language and its real test/probe
+commands. Commands are argument arrays, not shell strings:
+
+```json
+{
+  "language": "typescript",
+  "extensions": [".ts", ".tsx", ".js"],
+  "tests_dir": "tests",
+  "test_command": ["npx", "vitest", "run", "--reporter=json"],
+  "test_report": "vitest-json",
+  "probe_runner": ["npx", "tsx", "tools/run_probe.ts"],
+  "test_file_patterns": ["*.test.ts", "*.spec.ts"],
+  "max_hops": 2
+}
+```
+
+The adapter resolves direct, statically visible calls. Dynamic dispatch, reflection, unresolved
+imports, and unsupported build behavior remain unknown or inconclusive; they are never treated
+as proof of no impact. `tools/run_probe.ts` emits the same JSON probe shape as the Python
+harness. The configured TypeScript runtime must be installed by the reviewed repository.

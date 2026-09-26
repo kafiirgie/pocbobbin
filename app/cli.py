@@ -10,6 +10,7 @@ import json
 import sys
 from pathlib import Path
 
+from app.config import ConfigError, load_config
 from app.decisions import lookup
 from app.impact import analyze
 from app.runner import compare
@@ -53,12 +54,14 @@ def _prior_decisions(pair: RevisionPair, impact: ImpactResult) -> list[Decision]
     ]
 
 
-def pipeline(repo: str | Path, base: str, head: str, max_hops: int = 2, run: bool = False) -> ReviewReport:
+def pipeline(repo: str | Path, base: str, head: str, max_hops: int | None = None, run: bool = False) -> ReviewReport:
     """Snapshot → impact → prior decisions → (with `run`) paired execution of the frozen suite and probes."""
     with open_pair(repo, base, head) as pair:
-        impact = analyze(pair, max_hops)
+        config = load_config(pair.root)
+        effective_hops = config.max_hops if max_hops is None else max_hops
+        impact = analyze(pair, effective_hops, config)
         prior = _prior_decisions(pair, impact)
-        suites, comparisons, missing, notes = compare(pair, impact=impact) if run else ([], [], [], [])
+        suites, comparisons, missing, notes = compare(pair, impact=impact, config=config) if run else ([], [], [], [])
     return ReviewReport(
         repo=pair.repo,
         revisions=pair.revisions,
@@ -125,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default=".", help="Path inside the git repository (default: .)")
     parser.add_argument("--base", default="main", help="Base revision (default: main)")
     parser.add_argument("--head", default="HEAD", help="Head revision (default: HEAD)")
-    parser.add_argument("--max-hops", type=int, default=2, help="Caller levels to trace back (default: 2)")
+    parser.add_argument("--max-hops", type=int, default=None, help="Caller levels to trace back (default: behavior.json or 2)")
     parser.add_argument("--json", type=Path, help="Write the ReviewReport JSON here instead of stdout")
     parser.add_argument(
         "--run",
@@ -138,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         report = pipeline(args.repo, args.base, args.head, args.max_hops, run=args.run)
-    except SnapshotError as exc:
+    except (SnapshotError, ConfigError, RuntimeError) as exc:
         print(f"behavior-review: {exc}", file=sys.stderr)
         return 2
 
