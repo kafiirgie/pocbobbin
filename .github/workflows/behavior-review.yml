@@ -32,31 +32,17 @@ jobs:
 
       - name: Run Behavior Review
         run: |
-          # Try running CLI via entrypoint or direct module execution
+          # Execute behavior review against PR base ref
           if command -v behavior-review >/dev/null 2>&1; then
             behavior-review \
               --base "origin/${{ github.base_ref }}" \
               --head HEAD \
-              --format markdown \
-              --out report.md \
               --json report.json
-          elif [ -f "app/cli.py" ]; then
+          else
             python -m app.cli \
               --base "origin/${{ github.base_ref }}" \
               --head HEAD \
-              --format markdown \
-              --out report.md \
               --json report.json
-          elif [ -f "contracts/report_scenario1.json" ]; then
-            echo "Using contract fixture for initial CI integration test..."
-            cp contracts/report_scenario1.json report.json
-            echo "### Behavior Review Report (CI Stub)" > report.md
-            echo "Automated paired execution completed against contract fixture." >> report.md
-          else
-            echo "Creating fallback CI status report..."
-            echo '{"status": "initialized", "fixture": true}' > report.json
-            echo "### Behavior Review Report" > report.md
-            echo "Behavior review workflow initialized and running in PR environment." >> report.md
           fi
 
       - name: Upload Review Artifact
@@ -74,10 +60,92 @@ jobs:
           script: |
             const fs = require('fs');
             let body = '';
+
             if (fs.existsSync('report.md')) {
               body = fs.readFileSync('report.md', 'utf8');
+            } else if (fs.existsSync('report.json')) {
+              try {
+                const data = JSON.parse(fs.readFileSync('report.json', 'utf8'));
+                const rev = data.revisions || {};
+                const impact = data.impact || {};
+                const outside = (impact.paths || []).filter(p => p.outside_diff && !p.is_test);
+
+                const lines = [
+                  '## 🔍 Behavior Review Report',
+                  '',
+                  `**Revisions:** \`${(rev.base_sha || '').slice(0, 7)}\` (${rev.base_ref || 'base'}) → \`${(rev.head_sha || '').slice(0, 7)}\` (${rev.head_ref || 'head'})`,
+                  '',
+                  '### 📈 Impact Summary',
+                  `- **Changed Symbols:** ${(impact.changed_symbols || []).length}`,
+                  `- **Impact Paths:** ${(impact.paths || []).length}`,
+                  `- **Callers Outside Diff:** ${outside.length}`,
+                  `- **Unknowns:** ${(impact.unknowns || []).length}`,
+                  ''
+                ];
+
+                if (outside.length > 0) {
+                  lines.push('### ⚠️ Callers Outside Diff');
+                  lines.push('| Caller Symbol | File & Line | Rendered Path |');
+                  lines.push('|---|---|---|');
+                  for (const p of outside) {
+                    const h0 = p.hops && p.hops[0] ? p.hops[0] : {};
+                    const renderPath = (p.hops || []).map(h => h.symbol).join(' → ');
+                    lines.push(`| \`${h0.symbol || ''}\` | \`${h0.path || ''}:${h0.line || ''}\` | \`${renderPath}\` |`);
+                  }
+                  lines.push('');
+                } else {
+                  lines.push('✅ **No non-test callers outside the diff impacted.**\n');
+                }
+
+                const comparisons = data.comparisons || [];
+                if (comparisons.length > 0) {
+                  lines.push('### 🧪 Behavior Comparisons');
+                  lines.push('| Probe | Base Output | Head Output | Outcome |');
+                  lines.push('|---|---|---|---|');
+                  for (const c of comparisons) {
+                    const pId = (c.probe && c.probe.id) || 'unknown';
+                    const bOut = JSON.stringify(c.base && c.base.output);
+                    const hOut = JSON.stringify(c.head && c.head.output);
+                    const outcome = c.outcome || 'unknown';
+                    lines.push(`| \`${pId}\` | \`${bOut}\` | \`${hOut}\` | \`${outcome}\` |`);
+                  }
+                  lines.push('');
+                }
+
+                const decisions = data.decisions || [];
+                if (decisions.length > 0) {
+                  lines.push('### 📝 Recorded Decisions');
+                  lines.push('| Symbol | Intent | Rationale | Status |');
+                  lines.push('|---|---|---|---|');
+                  for (const d of decisions) {
+                    const sym = (d.target && d.target.symbol) || 'unknown';
+                    const intent = d.intent || 'unknown';
+                    const rat = d.rationale || '-';
+                    const st = d.status || 'proposed';
+                    lines.push(`| \`${sym}\` | \`${intent}\` | ${rat} | \`${st}\` |`);
+                  }
+                  lines.push('');
+                }
+
+                const limits = data.limits || [];
+                if (limits.length > 0) {
+                  lines.push('<details><summary>Operational Limits</summary>\n');
+                  for (const l of limits) {
+                    lines.push(`- ${l}`);
+                  }
+                  lines.push('\n</details>\n');
+                }
+
+                lines.push('---');
+                lines.push('*AI proposes, algorithms verify, humans decide.*');
+
+                body = lines.join('\n');
+                fs.writeFileSync('report.md', body, 'utf8');
+              } catch (e) {
+                body = `### Behavior Review\nError parsing report.json: ${e.message}`;
+              }
             } else {
-              body = '### Behavior Review\nReview finished without markdown output.';
+              body = '### Behavior Review\nReview finished without JSON report.';
             }
 
             const marker = '<!-- behavior-review-comment -->';
