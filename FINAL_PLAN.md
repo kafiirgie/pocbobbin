@@ -5,6 +5,8 @@ Deadline: **27 Sept 2026, 22:00 WIB/Bangkok (15:00 UTC)** · Target upload: **21
 
 This file supersedes HACKATHON_PLAN.md and BOB_BUILD_PLAN.md as the single team plan. Those two files remain useful reference for engineering detail, but where they disagree, this file wins.
 
+**v2 changes (26 Sept, evening):** added **Lane E — Maps** (evidence map per PR + whole-repo module map, §16), documented the **current multi-language adapters** (§17) and the actual web stack (§9), added a Bob-first roadmap line (§18), and an **end-to-end consistency matrix for multi-language repos** (§19) — including a small agreed schema addition, `ReviewReport.analysis`. Everything that touches another lane's files is written as a marked **`TODO(<lane>)`** item so owners can pick it up. Section numbers 1–15 are unchanged.
+
 > **AI proposes. Algorithms verify. Humans decide.**
 
 ---
@@ -58,6 +60,7 @@ Use this analogy in the video intro and slides — it's memorable and shows doma
 | No hallucination | Every claim in the report comes from AST parsing or real execution. The LLM never decides "bug or not." |
 | Honest about limits | Unknown edges are shown as *unknown*, never as *safe*. Setup failures are *inconclusive*, never *bug*. |
 | Something judges can open | Public Vercel demo page showing a real run, linked to its public GitHub Actions log. |
+| One picture explains the product | An **evidence map**: the changed function, the caller outside the diff, and each node colored by what *execution* proved (changed / behavior differs / same / unknown / needs probe). Code-map tools color by "file changed"; we color by "behavior changed" (§16). |
 
 Learned from Bob 1.0 winners (Atlas, Pedigree, Sandbox): none built a custom "agent" — the core was ordinary deterministic code, with AI called in a few focused places. Pedigree used a Bob custom mode + MCP. We follow the same pattern.
 
@@ -84,7 +87,9 @@ flowchart TD
     HUMAN -->|Intended + rationale| LEDGER["behavior_decisions/*.json<br/>approved when merged to main"]
     HUMAN -->|Unsure| OPEN["Unresolved — shown prominently"]
     REPORT --> COMMENT["PR comment (via Action)"]
-    REPORT --> WEB["Vercel demo page<br/>real run + link to Action log"]
+    REPORT --> WEB["Vercel demo page<br/>evidence map + real run + Action log link"]
+    MAPCMD["behavior-review map<br/>(Lane E)"] --> REPOMAP["repo_map.json<br/>modules, imports, last commit/PR"]
+    REPOMAP --> WEB
 ```
 
 **Key design rule:** the engine is `pipeline(base_revision, head_revision)` and knows nothing about GitHub, Bob, or the web. Each door just calls it differently.
@@ -104,7 +109,7 @@ flowchart TD
 
 | Step | Method | Claims | Never claims |
 |---|---|---|---|
-| Changed symbols | Python `ast` on both revisions | Which functions/signatures/imports/bodies changed; tags like `signature_changed`, `body_changed` | *Why* it changed |
+| Changed symbols | Python `ast` on both revisions (other languages: Tree-sitter adapters, see §17) | Which functions/signatures/imports/bodies changed; tags like `signature_changed`, `body_changed` | *Why* it changed |
 | Impact graph | Dict/adjacency list; reverse callers up to 2 hops; union of old+new edges | Callers outside the diff, with file:line path, e.g. `price_total → apply_discount` | "No impact" when edges are unresolved — those are listed as **unknown** |
 | Existing tests | Freeze the **base** test suite, run the identical suite on both revisions | Pass/fail on each side | That passing = correct |
 | Probes | Small deterministic scripts, JSON inputs/outputs, identical bytes on both revisions | "Same input → different output" | Equivalence for all inputs |
@@ -187,12 +192,15 @@ Lookup matches exact repo + path + symbol from approved records on `main`. Stale
 | **P1.1** | GitHub Action | PR → Action runs CLI → one PR comment updated per push; report uploaded as artifact |
 | **P1.2** | Ledger + lookup | Scenario 5 cites the decision approved in Scenario 2 |
 | **P1.3** | Vercel demo page | Judge opens URL, sees a real run (with Action log link), clicks through impact path and old/new outputs, tries a session-only decision with rationale |
-| P2 | Polish | Only after all above work |
+| **P1.4** | **Evidence map (Lane E)** | Scenario 1's real report renders as a node-link map: changed symbol, caller outside diff, node colors from real outcomes, unknown edges dashed (§16.2) |
+| **P1.5** | **`CHANGE_NOTES.md` from Bob** | `/behavior-review` writes a draft labeled "drafted by Bob" plus 2–3 questions the author must answer; answers become the ledger rationale (§16.4, `TODO(D)`) |
+| P2.1 | Whole-repo module map (Lane E) | `behavior-review map` writes `repo_map.json`; web shows modules, imports, last commit/PR per module, support tier per language (§16.3) |
+| P2 | Polish (incl. 21st.dev UI refresh) | Only after all above work |
 
-**Cut order if time runs out:** visual polish → richer graph coverage → Scenario 5 lookup → demo page interactivity (keep a static page) → nothing else.
+**Cut order if time runs out:** visual polish → whole-repo map (P2.1) → richer graph coverage → Scenario 5 lookup → evidence map interactivity (keep a static render) → demo page interactivity (keep a static page) → nothing else.
 **Never cut:** real paired execution, caller-outside-diff, human decision + ledger, Bob custom mode.
 
-**Deferred (say so honestly):** languages other than Python, class-heavy/dynamic code, arbitrary repos, forks, container sandboxing, Jev, Pi, webhook server, IDE extensions, Jenkins, autonomous fix loops.
+**Deferred (say so honestly):** full behavior evidence for non-Python languages (static impact exists, see §17), class-heavy/dynamic code, arbitrary repos, forks, container sandboxing, Jev, Pi, webhook server, IDE extensions, Jenkins, autonomous fix loops, integrations for other coding agents (§18).
 
 ---
 
@@ -205,8 +213,12 @@ behavior-review/
   app/
     schemas.py                   # A — shared Pydantic models (ReviewReport, ProbeBundle, Decision)
     snapshot.py                  # A — resolve base/head into isolated checkouts (git worktree)
-    impact.py                    # A — AST + graph
-    cli.py                       # A — pipeline(base, head) + CLI entry
+    impact.py                    # A — Python AST + graph; dispatches to adapters
+    impact_treesitter.py         # A — Tree-sitter analysis for non-Python languages (§17)
+    adapters/registry.py         # A — LanguageAdapter registry (python-ast + tree-sitter)
+    config.py                    # A — reads optional behavior.json (language, test/probe commands)
+    repo_map.py                  # E — NEW: whole-repo module map → repo_map.json (§16.3)
+    cli.py                       # A — pipeline(base, head) + CLI entry (+ `map` subcommand: TODO(A), §16.5)
     runner.py                    # B — run frozen tests/probes on both revisions, compare
     decisions.py                 # D — validate/save decisions, lookup approved ones
     report.py                    # C — Markdown (PR comment) + web data from ReviewReport
@@ -216,12 +228,29 @@ behavior-review/
   contracts/                     # ALL in hour 0, then A — fixture JSON per boundary
   .bob/custom_modes.yaml         # D — the /behavior-review mode (verify IDE path in hour 0)
   .github/workflows/behavior-review.yml   # D — the Action
+  tools/run_probe.py, run_probe.ts, run_command_probe.py   # B — probe harnesses per language
   web/                           # C — Vercel demo page (reads report JSON)
-  handoffs/A.md B.md C.md D.md   # each owner, ~1 page
+    src/components/EvidenceMap.tsx   # E — NEW
+    src/components/RepoMap.tsx       # E — NEW (P2.1)
+    src/lib/evidence-map.ts          # E — NEW: ReviewReport → nodes/edges/status
+    src/lib/repo-map.ts              # E — NEW: repo_map.json → nodes/edges
+  tests/test_repo_map.py         # E — NEW
+  handoffs/A.md B.md C.md D.md E.md   # each owner, ~1 page
   bob_sessions/                  # everyone's real Bob task summary screenshots
 ```
 
-Stack: Python, stdlib `ast` + `git` subprocess, pytest, Pydantic. Web page: simplest thing that deploys to Vercel (static HTML/JS reading JSON is fine). No React-heavy frontend, no ORM, no Redis, no graph DB, no vector store.
+### Stack (as actually built, per code reading on 26 Sept)
+
+| Part | What it uses |
+|---|---|
+| Engine (required) | Python ≥ 3.11 (uses `StrEnum`), stdlib `ast`, `git` via subprocess, **Pydantic** — the only required dependency |
+| Multi-language (optional) | `tree-sitter` + `tree-sitter-language-pack`, installed with `pip install ".[multilang]"` |
+| Test/probe execution | Each language's own runner, called as an argv command (pytest, Vitest, or what `behavior.json` configures) |
+| Web | React 18 + Vite + TypeScript + Tailwind v4, shadcn-style components in `web/src/components/ui/` |
+| Maps (Lane E, new) | **React Flow (`@xyflow/react`) + dagre** for layout — `TODO(C)`: approve the two dependencies in `web/package.json` |
+| UI components | **21st.dev** (shadcn-format React + Tailwind components) for the UI refresh — `TODO(C)`, rules in §16.6 |
+
+Still no ORM, Redis, graph DB, vector store, or webhook server.
 
 ### Contracts
 
@@ -233,16 +262,18 @@ Stack: Python, stdlib `ast` + `git` subprocess, pytest, Pydantic. Web page: simp
 | `decisions.validate_and_save` | delta, disposition, rationale → Decision or error | D |
 | `decisions.lookup` | approved records, symbols → matches / stale | D |
 | `report.render` | ReviewReport → Markdown, web data | C |
+| `repo_map.build` | repo root, config → `repo_map.json` (modules, import edges, last commit/PR, unknowns, support tier) | E |
+| `evidenceMap(report)` (TS) | ReviewReport JSON → map nodes, edges, node status | E |
 
 A approves any shared schema change and tells affected owners.
 
 ### GitHub Action (sketch)
 
-On `pull_request` (opened, synchronize, reopened): checkout with full history → `pip install -e .` → `behavior-review --base origin/${{ github.base_ref }} --head HEAD --format markdown --out report.md --json report.json` → upload `report.json` as artifact → create/update **one** PR comment. Permissions: `contents: read`, `pull-requests: write`. The Action **reuses committed probes**; it never calls Bob. If an impacted caller has no probe, the report says `needs_bob_action` — the author runs `/behavior-review` in Bob IDE to create one.
+On `pull_request` (opened, synchronize, reopened): checkout with full history → `pip install -e .` → `behavior-review --base origin/${{ github.base_ref }} --head HEAD --run --link action_run=<run URL> --json report.json` (`--markdown report.md` is also available) → upload `report.json` as artifact → create/update **one** PR comment. Permissions: `contents: read`, `pull-requests: write`. The Action **reuses committed probes**; it never calls Bob. If an impacted caller has no probe, the report says `needs_bob_action` — the author runs `/behavior-review` in Bob IDE to create one.
 
 ---
 
-## 10. Team: four parallel lanes
+## 10. Team: parallel lanes (A–D below, Lane E in §16)
 
 ### How we work in parallel without waiting on each other
 
@@ -301,7 +332,7 @@ T0 = the moment the team starts. Clock times are fixed at the end.
 
 ### Bobcoins
 
-4 participants × 40 Bobcoins = 160 (check real balances in hour 0; credits are per account and not transferable).
+40 Bobcoins per participant (4 people = 160; with a Lane E owner = 200). Check real balances first; credits are per account and not transferable.
 
 | Lane | Setup / module / integration / reserve |
 |---|---|
@@ -309,6 +340,7 @@ T0 = the moment the team starts. Clock times are fixed at the end.
 | B | 4 / 24 / 4 / 8 |
 | C | 4 / 16 / 8 / 12 (lighter coding; reserve for page fixes) |
 | D | 4 / 20 / 8 / 8 (the recorded Bob fix comes from D's reserve) |
+| E | 4 / 20 / 8 / 8 (evidence map first; repo map only from what's left) |
 
 Checkpoints per person: ~4 coins → working first result, check balance; ~20 → callable module delivered; 32 → stop features, keep the reserve for integration/fixes/demo.
 
@@ -348,7 +380,7 @@ The per-lane schedule is in §10. These times do not move:
 | Time | Moment |
 |---|---|
 | 0:00–0:20 | **Problem + MOC hook.** "In oil & gas, you can't change a plant without Management of Change. In code, an AI can change a helper and nobody checks who else depends on it." |
-| 0:20–1:20 | **The catch.** Diff = 1 file, all tests green. `/behavior-review` in Bob IDE → graph finds `invoice.price_total` in another file → Bob writes a probe → same input, old 100.00 vs new 99.99. |
+| 0:20–1:20 | **The catch.** Diff = 1 file, all tests green. `/behavior-review` in Bob IDE → graph finds `invoice.price_total` in another file → Bob writes a probe → same input, old 100.00 vs new 99.99. **Cut to the evidence map:** `invoice.price_total` lights up as "outside diff · behavior differs". |
 | 1:20–2:10 | **The fix + the decision.** Author: unintended → Bob fixes → same probe reruns clean. Second change: intended → rationale → decision JSON → merged = approved. |
 | 2:10–2:45 | **After the PR.** GitHub Action posts the same evidence on the PR; later change cites the approved decision. Show the Vercel page. |
 | 2:45–3:00 | **Close.** "AI proposes, algorithms verify, humans decide." Honest limits + what Bob did. |
@@ -365,7 +397,9 @@ The per-lane schedule is in §10. These times do not move:
 - [ ] Bob Usage statement ≤ 500 words — what Bob actually built, the custom mode, probes it wrote, the fix; say honestly what was manual
 - [ ] MP4 ≤ 3 min, ≥ 90 s solution
 - [ ] Slides, cover image, tags, description, Vercel URL
-- [ ] README: install (`pip install -e .`), run CLI, use `/behavior-review`, how the Action works, limits
+- [ ] README: install (`pip install -e .`), run CLI, use `/behavior-review`, how the Action works, limits, **Python ≥ 3.11**
+- [ ] README: **language support tier table** from §17 — no "supports 15 languages" claim without the tiers
+- [ ] Licenses of any 21st.dev components copied into `web/` are MIT-compatible and listed
 - [ ] No secrets, no local paths (e.g. `C:/Users/...`) in published files
 - [ ] Fresh-browser check of every link before 21:00
 
@@ -378,3 +412,214 @@ The per-lane schedule is in §10. These times do not move:
 3. **Real Bobcoin balances** of all four accounts.
 4. **Product name** (shown in video/slides/repo). Candidates: *BlastRadius*, *ChangeGuard*, *BehaviorLock*, *MOC for Code*.
 5. **Sample scenario details** (§6) — exact functions and the rounding change, so B and D build the same thing.
+6. **Lane E owner** named, with their own Bob account; C and A agree to the `TODO(C)` / `TODO(A)` items in §16.5.
+
+---
+
+## 16. Lane E — Maps (evidence map + repo map)
+
+### 16.1 Why this lane exists
+
+Vibe-coded changes fail review because the author can't picture *where* their change lands. A map answers that in one glance. Plain code maps already exist (CodeSee Review Maps color files by "changed"; Google Code Wiki / DeepWiki draw repo architecture; CodeRabbit writes walkthroughs). **Our map is different: it is colored by execution evidence**, not by "file touched". That keeps it on-message and makes it the single best frame for the video.
+
+Two rules carry over from §5:
+- **Maps are drawn by code, never by an AI.** An LLM-drawn architecture diagram can invent edges. Nodes and edges come only from the adapters (§17) and git.
+- **Unknown stays unknown.** Unresolved references are drawn as dashed edges, never hidden.
+
+Lane E works **only from existing outputs** (`report.json`, git), so it waits on no one. Start with the real report already in `web/public/data/report.json`.
+
+### 16.2 E1 — Evidence map per PR (P1.4, do first)
+
+Source: the existing `ReviewReport` — **no engine or schema change needed.**
+
+| Node / edge state | Taken from | Visual |
+|---|---|---|
+| Changed in the diff | `impact.changed_symbols` | Solid accent border, "Changed" badge |
+| Caller outside the diff | `impact.paths[].outside_diff` (first hop) | Thick accent border, "Outside diff" badge |
+| Behavior differs | `comparisons[].outcome = delta_observed` for that `probe.target` | Red fill, old → new value in tooltip |
+| Same on tested cases | `same_on_tested_cases` | Green fill ("same on tested cases", never "safe") |
+| Inconclusive | `inconclusive` | Amber fill, reason in tooltip |
+| Needs a probe | `needs_bob_action` | Grey fill, "Run /behavior-review in Bob" hint |
+| Pre-existing failure | `pre_existing_failure` | Neutral with warning icon |
+| Has a decision | `decisions` / `prior_decisions` for that target | Small badge: intent + status (e.g. "intended · approved") |
+| Resolved call edge | `impact.edges` | Solid arrow caller → callee, file:line on hover |
+| Unknown edge | `impact.unknowns[].may_reach` | Dashed grey arrow, reason on hover |
+
+If a node matches several states, show the strongest: **delta > inconclusive > needs probe > pre-existing > same > changed/outside-diff**, with the others as badges.
+
+Rendering: React Flow + dagre, left-to-right (callers → changed symbol). Legend always visible. The map header shows a **language + tier badge** read from `report.analysis` (§19) — never guessed from file extensions. Works at phone width (map scrolls inside its card). A static fallback (same layout, no drag/zoom) is acceptable if interactivity is cut.
+
+**Done when:** the real Scenario 1 report shows `invoice.price_total` as "outside diff · behavior differs", `discount.apply_discount` as changed, and every unknown as a dashed edge — with no fixture data.
+
+### 16.3 E2 — Whole-repo module map (P2.1, only after E1)
+
+New command: `behavior-review map --repo . --ref HEAD --out repo_map.json`.
+
+- **File/module level**, not function level: "file A imports file B".
+- **Reuse all language adapters** (§17): Python via `ast`; other languages via the Tree-sitter import parsing that already exists in `app/impact_treesitter.py`.
+- **Last commit per module:** `git log -1 --format=%H%x09%cs%x09%s -- <path>`. **PR number** parsed from merge-commit subjects ("Merge pull request #22 …"); `null` if none. No GitHub API, no author names in the published file.
+- **Every module carries its language's support tier**, read from the same `AdapterSpec.tier` the report uses (§19), so the repo map and the evidence map can never disagree.
+
+Draft shape (separate file — `ReviewReport` is untouched):
+
+```json
+{
+  "schema_version": "map-0.1",
+  "repo": "owner/name",
+  "sha": "<head sha>",
+  "generated_at": "2026-09-27T01:23:45Z",
+  "modules": [
+    {"path": "sample_project/pricing/invoice.py", "language": "python", "tier": "full",
+     "last_commit": {"sha": "4017458", "date": "2026-09-26", "subject": "Merge pull request #22 …", "pr": 22}}
+  ],
+  "edges": [{"from": "sample_project/pricing/invoice.py", "to": "sample_project/pricing/discount.py", "kind": "import", "line": 1}],
+  "unknowns": [{"path": "…", "line": 12, "expression": "importlib.import_module(name)", "reason": "dynamic import"}],
+  "limits": ["File-level imports only; function calls are in the PR evidence map"]
+}
+```
+
+UI: a "Repo map" tab. When a report is loaded, modules touched by the PR are highlighted and link to the evidence map. Large repos: group by folder (collapsed) — only if time allows; the sample repo is small.
+
+**Done when:** `repo_map.json` for the sample repo lists every module, its imports, and its last commit/PR; a test covers Python plus at least one Tree-sitter language; unknown imports are listed, not dropped.
+
+### 16.4 E3 — Support for `CHANGE_NOTES.md` (P1.5)
+
+The draft itself is written by Bob through D's custom mode. E only makes it visible and consistent:
+- E drafts the **template** (headings + the 2–3 required author questions) in `handoffs/E.md` for D to paste into the mode.
+- Template sections: *What changed* · *Where it lands* (link to evidence map) · *What behaved differently* (from `comparisons`) · *Questions for the author* · *Author answers* (empty until the author fills them).
+- Labels: "Drafted by Bob — not evidence" on the draft; the author's answers become the ledger `rationale`.
+
+### 16.5 Overlaps with other lanes (TODO list)
+
+Lane E creates only new files. Everything below touches another lane's files and is **that lane's call**; E prepares it and asks.
+
+| ID | Owner | Task | Why E needs it | Status |
+|---|---|---|---|---|
+| `TODO(C)-1` | C | Add `@xyflow/react` and `@dagrejs/dagre` to `web/package.json` | Map rendering | [ ] |
+| `TODO(C)-2` | C | Mount `<EvidenceMap>` in `App.tsx` (near/instead of the list in `ImpactPath.tsx`) and later a "Repo map" tab | Show the map on the page | [ ] |
+| `TODO(C)-3` | C | Expose raw `impact.edges`, `impact.unknowns`, `comparisons`, `needs_bob_action`, `decisions` from `report-adapter.ts`, **or** let E read the raw report JSON directly | Node states need these fields | [ ] |
+| `TODO(C)-4` | C | Copy `repo_map.json` into `web/public/data/` next to `report.json` | Repo map tab | [ ] |
+| `TODO(C)-5` | C | UI refresh with 21st.dev (rules in §16.6); define theme tokens first so the maps use the same colors | Consistent look | [ ] |
+| `TODO(A)-1` | A | Add the `map` subcommand in `cli.py` calling `repo_map.build` (E writes the function) | CLI entry | [ ] |
+| `TODO(A)-2` | A | Expose a small public function for import parsing/resolution in `impact_treesitter.py` (today `_parse_language_imports` / `_resolve_import` are private) | Reuse adapters, no copy-paste | [ ] |
+| `TODO(A)-3` | A | Check name-based call matching for false edges (e.g. the PHP fixture calls `apply($value)` inside a class — in PHP that is a global function, not `$this->apply`) | Maps must not draw edges that don't exist | [x] bare calls resolve to a sibling method only in implicit-receiver languages; PHP `$this->`/`static::` now resolve |
+| `TODO(D)-1` | D | Action also runs `behavior-review map` and uploads `repo_map.json` as an artifact | Real, linkable map data | [ ] |
+| `TODO(D)-2` | D | Add the `CHANGE_NOTES.md` instructions (E's template) to `.bob/custom_modes.yaml` | P1.5 | [ ] |
+| `TODO(B)-1` | B | Confirm `comparisons[].probe.target` always matches the `SymbolRef` used in `impact` (same path + symbol spelling) — **for every supported language**, e.g. Tree-sitter's `Discount.apply` in Java (§19 row 9) | Map joins outcomes to nodes by that key | [ ] |
+| `TODO(A)-4…`, `TODO(B)-2`, `TODO(C)-6`, `TODO(D)-3…`, `TODO(E)-1` | various | Multi-language consistency items | See §19 | [ ] |
+| `TODO(C/pitch)-1` | C | Put the evidence map frame in the video (§13) and the tier table on a slide | Story | [ ] |
+
+### 16.6 UI rules for 21st.dev (for `TODO(C)-5`)
+
+1. Pick few components; skip any that pull heavy extra libraries.
+2. Check **Tailwind v4** compatibility (the web uses v4; many snippets assume v3).
+3. Check each component's **license** before copying (submission must be MIT-compliant) and list it.
+4. Use the website/CLI to copy components; don't depend on the 21st AI generator (needs an API key and muddies "built with Bob").
+5. Fix theme first — colors, spacing, type scale, dark mode — then components. Map node colors come from the same tokens.
+
+### 16.7 Lane E schedule
+
+| Block | E does | Must be true before moving on |
+|---|---|---|
+| Now → +3 h | `evidence-map.ts` (report → nodes/edges/status) + `EvidenceMap.tsx`, running locally on the real `report.json`; send `TODO(C)-1..3` to C | Scenario 1 map correct with real data |
+| +3 → +5 h | Legend, tooltips (old/new values, reasons), static fallback, phone width | C has mounted the map (`TODO(C)-2`) |
+| +5 → +8 h (or morning) | `repo_map.py` + test (Python first run, then reuse Tree-sitter via `TODO(A)-2`); `RepoMap.tsx` | `repo_map.json` real for the sample repo |
+| Morning → 14:00 | `CHANGE_NOTES.md` template to D; screenshots/recording of the map for C's video | Feature freeze 14:00 |
+| After 14:00 | Help verify map claims in video/slides; handoff + Bob screenshots | — |
+
+**E's own cut order:** repo-map folder grouping → repo-map non-Python languages → repo map entirely → evidence-map interactivity. **Never cut** the evidence map for Scenario 1.
+
+---
+
+## 17. Multi-language support (current state)
+
+Based on reading the repo code on 26 Sept (`app/adapters/registry.py`, `app/impact_treesitter.py`, `tests/test_treesitter.py`, `MULTI_LANGUAGE_IMPLEMENTATION_PLAN.md`). **Confirmed by running the full suite on 26 Sept evening:** 109 passed with the `multilang` extra installed (the Tree-sitter tests skip without it). The scenario "before" revision is the `ref/base` tag.
+
+How it works:
+- A repo may add a root **`behavior.json`** (language, file extensions, test command, test reporter, probe runner, max hops). Without it, Python defaults apply.
+- `LanguageAdapter` registry: `python` → stdlib `ast`; 14 others → Tree-sitter via `tree-sitter-language-pack` (optional extra `multilang`).
+- Execution: configured argv commands; parsers for pytest text and Vitest JSON; probe harnesses `run_probe.py`, `run_probe.ts`, and `run_command_probe.py` (probe JSON names its own command, e.g. `go run …`).
+
+| Tier | Languages | What the tests show today |
+|---|---|---|
+| **Full** | Python | Cross-file impact, paired execution, real demo scenarios |
+| **Static + probe harness** | TypeScript, JavaScript | Cross-file impact + unknown edges; TS probe harness and Vitest parser exist; no real end-to-end report yet |
+| **Static, cross-file** | Java, C#, Go | Cross-file caller resolution tested |
+| **Experimental** | C, C++, Rust, PHP, Kotlin, Ruby, Swift, Dart, Bash | Same-file caller only; possible name-based false edges (`TODO(A)-3`) |
+
+Tiers must live in **one place in code** (`AdapterSpec.tier`, `TODO(A)-4`) and be read from there by the report, the repo map, the UI, and the README table — see §19.
+
+**How to say it (pitch, README):** *"Python is fully supported end to end. The adapter architecture covers 15 languages; cross-file impact is verified for TypeScript/JavaScript, Java, C#, and Go; the rest are experimental."* Never claim behavior evidence for a language without a real run.
+
+Open items from the multi-language plan itself: Slice 5 (report/viewer shows language + adapter) and Slice 6 (real toolchain demo evidence) are not done. Don't add more languages before the deadline; one real TypeScript run shown on the page is worth more than a 16th language.
+
+---
+
+## 18. Roadmap line (Bob-first)
+
+We focus on Bob. Do **not** ship integration files for other coding agents in the repo. In the README and roadmap slide, one sentence is enough:
+
+> *"The engine is an agent-agnostic CLI. Bob IDE is the first-class integration today; an MCP server would let other MCP-capable tools call the same engine."*
+
+---
+
+## 19. End-to-end consistency across languages
+
+**Goal:** a repo in any registered language goes through the *same* chain — CLI → report → PR comment → web page → maps → Bob mode — and every layer tells the same story about what was analyzed, what was executed, and how much to trust it. Code reading on 26 Sept found the chain is **Python-consistent but not yet multi-language-consistent**. This section fixes that.
+
+### 19.1 One source of truth: the support tier
+
+Add `tier` to `AdapterSpec` in `app/adapters/registry.py` (values: `full`, `static_probe`, `static_cross_file`, `experimental`, matching §17). Everything else **reads** it; nothing hard-codes a language list or guesses from file extensions.
+
+### 19.2 Agreed schema addition (A)
+
+`ReviewReport` gets one optional field (default keeps old reports and fixtures valid):
+
+```json
+"analysis": {
+  "language": "typescript",
+  "adapter": "tree-sitter",
+  "tier": "static_probe",
+  "config_source": "behavior.json"
+}
+```
+
+A announces the change, updates `contracts/` fixtures and `tests/test_contracts.py` in the same commit (rule §10.2). `config_source` is `"behavior.json"` or `"defaults"`.
+
+### 19.3 Consistency matrix
+
+| # | Layer | Must be true for every language | Today (code reading) | Owner / TODO |
+|---|---|---|---|---|
+| 1 | Adapter registry | Each adapter declares its tier | ✅ `AdapterSpec.tier` | ~~`TODO(A)-4`~~ done |
+| 2 | Report | Report says which language/adapter/tier produced it | ✅ `report.analysis` | ~~`TODO(A)-5`~~ done |
+| 3 | Limits text | Non-`full` tiers add a plain warning, e.g. "Kotlin support is experimental: same-file callers only; treat missing paths as unknown" | ✅ tier warning from `TIER_LIMITS` | ~~`TODO(A)-6`~~ done |
+| 4 | Test execution | Unknown/unsupported test reporter → suite result **inconclusive**, never counted as passing | Parsers: pytest text, Vitest JSON only | **`TODO(B)-2`** verify + test this for a Go/Java config |
+| 5 | Probe harness | Each tier ≥ `static_probe` has a documented probe format (`run_probe.py`, `run_probe.ts`, `command` via `run_command_probe.py`) | Harnesses exist; formats not in one doc | **`TODO(B)-3`** one table in README: language → probe format + example |
+| 6 | GitHub Action | Reads `behavior.json`; installs `.[multilang]` when language ≠ python; sets up the needed toolchain (Node, Go, JDK…); **no `\|\| true`** that hides install errors; tool install works for a repo that isn't this one (pinned git URL) | Python 3.11 only, no `[multilang]`, no other toolchains, `\|\| true` present | **`TODO(D)-3`** |
+| 7 | Bob custom mode | Reads `behavior.json`; writes probes in the right format for that language; base branch from argument, not hard-coded `main`; states the tier and its limits to the author | Python-style probe format only, `--base main` hard-coded | **`TODO(D)-4`** |
+| 8 | PR comment (Markdown) | Shows language + tier line at the top | Not shown | **`TODO(C)-6`** in `report.render` |
+| 9 | Symbol naming | Probe targets use exactly the symbol spelling the adapter emits (e.g. `Discount.apply` for Java, `priceTotal` for TS) so outcomes join to graph nodes | Join is by `(path, symbol)`; spelling rules not documented per language | **`TODO(B)-1`** (extended) + list the spelling per language in the README probe table |
+| 10 | Web page | Header badge: language + tier from `report.analysis`; unknown/inconclusive visible for every language | UI strings are already language-neutral ✓; no badge | **`TODO(C)-6`** (same item as row 8, UI side) |
+| 11 | Evidence map | Uses `report.analysis.tier`; never styles a node "same" if its suite was inconclusive | Not built yet | **`TODO(E)-1`** |
+| 12 | Repo map | Per-module tier from `AdapterSpec.tier`; unknown imports listed | Not built yet | E (§16.3) |
+| 13 | README / slides | Tier table generated from (or checked against) the registry, not typed by hand | Not written | **`TODO(C/pitch)-1`** |
+
+### 19.4 Proof of consistency (acceptance)
+
+Consistency is claimed only for what has a **real end-to-end run**:
+
+| Run | Chain that must work | Status |
+|---|---|---|
+| Python sample (Scenarios 1–5) | CLI → report (`analysis.tier = full`) → PR comment → web → evidence map → Bob mode | Required (P0/P1) |
+| One TypeScript sample (e.g. `src/discount.ts` / `src/invoice.ts`) | Action with `[multilang]` + Node → report (`static_probe`) → comment → web → evidence map | **Stretch** — only if §19.3 rows 1–8 are done before ~22:00 tonight |
+| Any other language | Analysis only, labeled by tier | Not claimed |
+
+If the TypeScript run isn't done by feature freeze, the pitch claims **Python end to end** and describes the other languages by tier (§17). Do not show a non-Python map or report in the video unless it came from a real run.
+
+### 19.5 Order of work (so nobody blocks)
+
+1. A: rows 1–3 (small; unblocks everyone) → announce schema change.
+2. B: rows 4, 5, 9 in parallel.
+3. C: rows 8, 10 once `analysis` exists in a fixture. E: row 11 at the same time.
+4. D: rows 6, 7 (Action + mode) — test on the Python sample first, then the TS sample.
+5. Everyone: the TS stretch run (§19.4) only after the Python chain is green.

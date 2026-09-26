@@ -203,12 +203,20 @@ class Decision(Model):
 # --- Report (the one object every door consumes) ------------------------------
 
 
+class Analysis(Model):
+    language: str
+    adapter: str = Field(description="'python-ast' or 'tree-sitter'.")
+    tier: str = Field(description="full | static_probe | static_cross_file | experimental (app/adapters/registry.py).")
+    config_source: str = Field(description="'behavior.json' (read from the base revision) or 'defaults'.")
+
+
 class ReviewReport(Model):
     schema_version: str = SCHEMA_VERSION
     fixture: bool = Field(default=False, description="True for hand-written contract examples; never shown in the final demo.")
     generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     repo: str = Field(description="'owner/name' from the origin remote, else the folder name. Matches Decision.repo.")
     revisions: Revisions
+    analysis: Analysis | None = Field(default=None, description="Which language, adapter and support tier produced this report.")
     impact: ImpactResult
     tests: list[SuiteRun] = Field(default_factory=list)
     comparisons: list[Comparison] = Field(default_factory=list)
