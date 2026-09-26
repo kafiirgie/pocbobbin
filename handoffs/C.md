@@ -12,14 +12,17 @@ review follow-up. Detailed design notes: `PERSON_C_PLAN.md`.
 - `web/` — Vite + React + TypeScript + Tailwind evidence viewer. `src/lib/report-adapter.ts` reads
   the engine's `ReviewReport` directly (revisions, `impact.changed_symbols`, `hops`, nested `probe`,
   suite runs, `prior_decisions`) and still tolerates the older shapes in `tests/fixtures/`.
-- `web/public/data/report.json` — a real `--run` of `ref/base` vs `origin/scenario1-head`
-  (`fixture: false`). `npm test` (`scripts/check-report.mjs`) fails if it is a fixture, lacks real
-  SHAs, a non-test caller outside the diff or probe comparisons, or contains a local path.
+- `web/public/data/report.json` — the unmodified `report.json` artifact of the `behavior-review`
+  Action run on draft PR #19 (Scenario 1, do not merge), stamped with `links.action_run` so the
+  page links to that run's public log. `npm test` (`scripts/check-report.mjs`) fails if it is a
+  fixture, isn't stamped with an Actions run URL, lacks real SHAs, a non-test caller outside the
+  diff or probe comparisons, or contains a local path.
 
 ## Commands
 ```bash
 cd web && npm install && npm test && npm run typecheck && npm run build
-behavior-review --base ref/base --head origin/scenario1-head --run --json web/public/data/report.json
+# refresh the page data from a newer Action run on the demo PR
+gh run download <run-id> --repo webdev-testa/pocbobbin --name behavior-review-report --dir web/public/data
 ```
 Vercel: root `web`, build `npm run build`, output `dist`.
 
@@ -31,7 +34,6 @@ sides, the approved Scenario 2 decision shown.
 
 ## Next
 - Deploy to Vercel and test the URL from a fresh browser.
-- Link the page to a public Actions run (`links.action_run`) once one exists for a scenario PR.
 
 ## Open question for the team
 `PERSON_C_PLAN.md` scopes out the video, slides and presentation, but `FINAL_PLAN.md` §10 gives

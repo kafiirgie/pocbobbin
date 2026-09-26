@@ -35,7 +35,8 @@ function asRecord(value: unknown): UnknownRecord | null {
     : null;
 }
 
-const LOCAL_PATH_PATTERN = /(?:[A-Za-z]:[\\/]|\\\\|\/(?:Users|home|private|tmp|var|workspace|mnt)\/)[^\s<>\"'`]+/g;
+// The lookbehind keeps the "s:/" inside "https://" from reading as a Windows drive letter.
+const LOCAL_PATH_PATTERN = /(?:(?<![A-Za-z])[A-Za-z]:[\\/]|\\\\|\/(?:Users|home|private|tmp|var|workspace|mnt)\/)[^\s<>\"'`]+/g;
 
 function redactLocalPaths(value: string): string {
   return value.replace(LOCAL_PATH_PATTERN, "[local path redacted]");

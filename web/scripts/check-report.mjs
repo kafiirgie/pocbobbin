@@ -14,6 +14,12 @@ if (!/^[0-9a-f]{40}$/.test(revisions.base_sha ?? "") || !/^[0-9a-f]{40}$/.test(r
   throw new Error("The shipped report must name the real base and head commits.");
 }
 
+// Provenance: judges must be able to follow the page back to the public CI run that produced it.
+const actionRun = report.links?.action_run ?? "";
+if (!/^https:\/\/github\.com\/[^/]+\/[^/]+\/actions\/runs\/\d+$/.test(actionRun)) {
+  throw new Error("The shipped report must be a CI artifact stamped with links.action_run.");
+}
+
 const paths = report.impact?.paths ?? [];
 if (!paths.some((path) => Array.isArray(path?.hops) && path.outside_diff === true && path.is_test === false)) {
   throw new Error("The shipped report must show at least one non-test caller outside the diff.");
@@ -29,11 +35,12 @@ for (const comparison of comparisons) {
   }
 }
 
-if (/[A-Za-z]:[\\/]|\/(?:Users|home)\//.test(JSON.stringify(report))) {
+// The lookbehind keeps the "s:/" inside "https://" from reading as a drive letter.
+if (/(?<![A-Za-z])[A-Za-z]:[\\/]|\/(?:Users|home)\//.test(JSON.stringify(report))) {
   throw new Error("The shipped report must not contain local absolute paths.");
 }
 
 console.log(
   `Report check passed: ${revisions.base_sha.slice(0, 7)}..${revisions.head_sha.slice(0, 7)}, ` +
-    `${paths.length} impact paths, ${comparisons.length} probe comparisons.`,
+    `${paths.length} impact paths, ${comparisons.length} probe comparisons, from ${actionRun}.`,
 );

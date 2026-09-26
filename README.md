@@ -127,8 +127,10 @@ labeled as such. History informs a review; it never approves a new difference.
 
 ## Web evidence viewer
 
-`web/` is a static React viewer for a report (impact paths, old vs new outputs, decisions). See
-`web/README.md` to run or deploy it. Decisions made there are session-only and approve nothing.
+`web/` is a static React viewer for a report (impact paths, old vs new outputs, decisions). It ships
+the unmodified `report.json` artifact of the Action run on the Scenario 1 demo PR, and links to that
+run's public log. See `web/README.md` to run or deploy it. Decisions made there are session-only and
+approve nothing.
 
 ## Limits
 
