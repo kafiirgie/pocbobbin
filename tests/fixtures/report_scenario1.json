@@ -1,0 +1,121 @@
+{
+  "schema_version": "0.1",
+  "fixture": true,
+  "run": {
+    "repo": "example/behavior-review",
+    "base_sha": "abc1234",
+    "head_sha": "def5678",
+    "generated_at": "2026-09-26T12:00:00Z",
+    "status": "complete"
+  },
+  "changed_symbols": [
+    {
+      "symbol": "pricing.discount.apply_discount",
+      "path": "pricing/discount.py",
+      "line": 12,
+      "change": "body_changed"
+    }
+  ],
+  "impact": {
+    "paths": [
+      {
+        "nodes": [
+          {
+            "symbol": "pricing.invoice.price_total",
+            "path": "pricing/invoice.py",
+            "line": 8,
+            "outside_diff": true
+          },
+          {
+            "symbol": "pricing.discount.apply_discount",
+            "path": "pricing/discount.py",
+            "line": 12
+          }
+        ]
+      }
+    ],
+    "unknowns": [
+      {
+        "from": "pricing.invoice.dynamic_total",
+        "to": "pricing.discount.apply_discount",
+        "reason": "dynamic dispatch was not resolved"
+      }
+    ]
+  },
+  "tests": [
+    {
+      "name": "tests/test_discount.py",
+      "status": "passed"
+    }
+  ],
+  "observations": [
+    {
+      "probe_name": "invoice-boundary",
+      "input": {
+        "subtotal": "100.00",
+        "rate": "0.10"
+      },
+      "probe_hash": "probe-001",
+      "base": {
+        "output": "100.00"
+      },
+      "head": {
+        "output": "99.99"
+      },
+      "outcome": "delta_observed"
+    },
+    {
+      "probe_name": "discount-ordinary",
+      "input": {
+        "subtotal": "50.00",
+        "rate": "0.10"
+      },
+      "probe_hash": "probe-002",
+      "base": {
+        "output": "45.00"
+      },
+      "head": {
+        "output": "45.00"
+      },
+      "outcome": "same_on_tested_cases"
+    },
+    {
+      "probe_name": "head-import-check",
+      "input": {
+        "subtotal": "10.00"
+      },
+      "probe_hash": "probe-003",
+      "base": {
+        "output": "10.00"
+      },
+      "head": {
+        "exception": "ImportError: optional dependency unavailable"
+      },
+      "outcome": "inconclusive",
+      "setup_status": "import_error"
+    }
+  ],
+  "decisions": [
+    {
+      "symbol": "pricing.invoice.price_total",
+      "probe_hash": "probe-001",
+      "disposition": "unresolved",
+      "rationale": "The author has not classified this observed difference yet."
+    },
+    {
+      "symbol": "pricing.discount.apply_discount",
+      "probe_hash": "probe-002",
+      "disposition": "intended",
+      "rationale": "The refactor keeps the ordinary discount case unchanged."
+    }
+  ],
+  "limits": [
+    "The impact graph is bounded and may contain unknown edges.",
+    "Tested inputs are examples, not all possible inputs.",
+    "Setup and import failures are inconclusive."
+  ],
+  "links": {
+    "action_run": "https://github.com/example/behavior-review/actions/runs/123456",
+    "artifact": "https://github.com/example/behavior-review/actions/runs/123456/artifacts/789"
+  }
+}
