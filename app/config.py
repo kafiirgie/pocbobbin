@@ -7,6 +7,7 @@ extensions, while preserving the Python defaults for legacy/empty repositories.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 from dataclasses import dataclass, field, replace
@@ -39,7 +40,7 @@ SUPPORTED_LANGUAGES = {
 LANGUAGE_DEFAULTS: dict[str, dict[str, Any]] = {
     "python": {
         "extensions": (".py",),
-        "tests_dir": "sample_project/tests",
+        "tests_dir": "tests",
         "test_command": ("python", "-m", "pytest", "-q", "--no-header"),
         "test_report": "pytest-text",
         "probe_runner": ("python", "tools/run_probe.py"),
@@ -270,6 +271,63 @@ def _detect_languages(root: Path) -> tuple[str, ...]:
     return tuple(sorted(scores, key=lambda language: (-scores[language], LANGUAGE_PRIORITY[language], language)))
 
 
+def detect_tests_dir(
+    repo: str | Path, patterns: tuple[str, ...] = ("test_*.py", "*_test.py", "conftest.py")
+) -> str | None:
+    """Find where a repository keeps its tests, so a real project runs without a behavior.json.
+
+    Returns the shallowest directory (relative posix path) holding a matching file, or "" when
+    tests live at the root, or None when nothing matches. Deliberately shallowest-first so a
+    nested duplicate cannot shadow the project's real suite.
+    """
+    root = Path(repo)
+    if not root.is_dir():
+        return None
+    skip = {".git", ".venv", "venv", "node_modules", "build", "dist", "__pycache__", ".tox",
+            ".mypy_cache", ".pytest_cache", "site-packages"}
+    candidates: set[str] = set()
+    for path in root.rglob("*"):
+        if not path.is_file() or path.name.startswith("."):
+            continue
+        if any(part in skip for part in path.relative_to(root).parts):
+            continue
+        if not any(fnmatch.fnmatch(path.name, pattern) for pattern in patterns):
+            continue
+        relative = path.relative_to(root).parent.as_posix()
+        if relative == ".":
+            return ""  # tests at the root are the shallowest answer possible
+        candidates.add(relative)
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: (item.count("/"), len(item)))
+
+
+def resolve_tests_dir(config: "BehaviorConfig", revision: str | Path) -> str:
+    """The test directory to use for `revision`: stated, else detected in that revision, else default.
+
+    Detection runs against the revision being frozen (BASE), never the live source tree, so the
+    suite and the code always come from the same commit.
+    """
+    root = Path(revision)
+    if (root / config.tests_dir).exists():
+        return config.tests_dir
+    patterns = config.test_file_patterns or ("test_*.py", "*_test.py", "conftest.py")
+    detected = detect_tests_dir(root, patterns)
+    if detected is not None:
+        return detected
+    # Nothing matched the configured adapter. A repository detected as another language must not
+    # be forced through Python's layout: try each detected adapter's own patterns before falling
+    # back, so a TypeScript repository finds its own specs instead of failing on 'tests'.
+    for language in config.languages:
+        defaults = LANGUAGE_DEFAULTS.get(language)
+        if not defaults or defaults["test_file_patterns"] == patterns:
+            continue
+        detected = detect_tests_dir(root, defaults["test_file_patterns"])
+        if detected is not None:
+            return detected
+    return config.tests_dir
+
+
 def _auto_detect_config(root: Path) -> "BehaviorConfig":
     languages = _detect_languages(root)
     if not languages:
@@ -284,7 +342,7 @@ class BehaviorConfig:
     languages: tuple[str, ...] = ("python",)
     extensions: tuple[str, ...] = (".py",)
     changed_file_filter: tuple[str, ...] = ()
-    tests_dir: str = "sample_project/tests"
+    tests_dir: str = "tests"
     test_command: tuple[str, ...] = ("python", "-m", "pytest", "-q", "--no-header")
     test_report: str = "pytest-text"
     probe_runner: tuple[str, ...] = ("python", "tools/run_probe.py")
@@ -424,4 +482,5 @@ def load_revision_config(
     return load_config(base_path, filename), notes
 
 
-__all__ = ["BehaviorConfig", "ConfigError", "load_config", "load_revision_config"]
+__all__ = ["BehaviorConfig", "ConfigError", "detect_tests_dir", "load_config",
+           "load_revision_config", "resolve_tests_dir"]

@@ -26,7 +26,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.config import BehaviorConfig, load_config
+from app.config import BehaviorConfig, load_config, resolve_tests_dir
 
 # A's shared schema is the source of truth. Import it when it is on the path;
 # fall back to plain dicts so this module stays usable standalone.
@@ -50,6 +50,7 @@ except ImportError:  # pragma: no cover
     HAS_SCHEMA = False
 
 TIMEOUT_S = 300
+# Legacy sentinel meaning "resolve the test directory from the repository under review".
 TESTS_DIR = "sample_project/tests"
 PROBES_DIR = "probes"
 
@@ -292,11 +293,17 @@ def _parse_report(checkout: Path, stdout: str, report: str) -> tuple[int, int, i
 
 def _freeze_tests(source: Path, tests_rel: str, frozen: Path, config: BehaviorConfig) -> None:
     destination = frozen / "tests"
+    # Check existence first, for every shape of tests_rel: the copytree branch would otherwise
+    # raise a raw OSError whose message embeds a temporary worktree path, which must never be
+    # published in a report.
+    if not source.exists():
+        raise FileNotFoundError(
+            f"no test directory at '{tests_rel or '.'}' in the base revision; "
+            "set 'tests_dir' in behavior.json to point at the suite to run"
+        )
     if tests_rel not in {"", "."}:
         shutil.copytree(source, destination)
         return
-    if not source.exists():
-        raise FileNotFoundError(f"test root '{tests_rel}' does not exist")
     for path in source.rglob("*"):
         if not path.is_file() or any(part in {".git", ".venv", "node_modules", "build", "dist"} for part in path.parts):
             continue
@@ -467,7 +474,9 @@ def compare(pair, bundle=None, python: str | None = None, probes_dir: str = PROB
     python = python or sys.executable
     settings = config or load_config(pair.base_path)
     if tests_rel == TESTS_DIR:
-        tests_rel = settings.tests_dir
+        # Resolve against BASE, not the live tree: the frozen suite and the code under review must
+        # come from the same commit. A foreign repo has no sample_project, so detection decides.
+        tests_rel = resolve_tests_dir(settings, pair.base_path)
     base_wt, head_wt = Path(pair.base_path), Path(pair.head_path)
     notes: list[str] = []
     prior_deltas = _prior_delta_probes(prior_report)
@@ -487,53 +496,74 @@ def compare(pair, bundle=None, python: str | None = None, probes_dir: str = PROB
     # Freeze the base test suite and the probe runner before touching any checkout.
     with tempfile.TemporaryDirectory(prefix="behavior-review-frozen-") as tmp:
         frozen = Path(tmp)
-        _freeze_tests(base_wt / tests_rel, tests_rel, frozen, settings)
-        suite_hash = _hash_extensions(frozen / "tests", settings.extensions)
+        # A repository with no discoverable suite is still reviewable: impact analysis and its
+        # unknowns are reported and the missing suite is stated as a limit. It is never silently
+        # replaced by another project's tests, and never reported as a clean result.
+        freeze_error: str | None = None
+        try:
+            _freeze_tests(base_wt / tests_rel, tests_rel, frozen, settings)
+        except FileNotFoundError as exc:
+            freeze_error = str(exc)
+            notes.append(f"{exc} No paired test run was performed, so no test-based claim is made.")
+        suite_hash = _hash_extensions(frozen / "tests", settings.extensions) if freeze_error is None else ""
         runner_rel = next(
             (token for token in settings.probe_runner if token.endswith((".py", ".ts", ".tsx", ".js", ".mjs"))),
             "tools/run_probe.py",
         )
-        runner_src = source_of(runner_rel)
-        frozen_runner = frozen / runner_src.name
-        shutil.copy2(runner_src, frozen_runner)
-        probes_src = source_of(probes_dir)
-        shutil.copytree(probes_src, frozen / "probes")
+        # Probes and the probe runner are opt-in: a repository under review need not ship them.
+        # When absent, the paired test-suite comparison still runs and is still evidence; no
+        # behaviour claim is made from probes, and the report says so.
+        frozen_runner: Path | None = None
+        try:
+            runner_src = source_of(runner_rel)
+            frozen_runner = frozen / runner_src.name
+            shutil.copy2(runner_src, frozen_runner)
+            probes_src = source_of(probes_dir)
+            shutil.copytree(probes_src, frozen / "probes")
+        except FileNotFoundError:
+            notes.append(
+                f"this repository has no probe runner ('{runner_rel}') or no '{probes_dir}/' "
+                "directory, so no behaviour claim is made from probe execution; only the paired "
+                "test run above counts."
+            )
         if not sorted((frozen / "probes").glob("*.json")):
             notes.append("no committed probes were found; no behavior claim is made from execution.")
 
         suites = []
-        for revision, wt, sha in (("base", base_wt, pair.revisions.base_sha),
-                                  ("head", head_wt, pair.revisions.head_sha)):
-            _install_frozen_tests(wt, tests_rel, frozen)
-            suites.append(run_suite(wt, tests_rel, suite_hash, python, revision, sha, settings))
+        if freeze_error is None:
+            for revision, wt, sha in (("base", base_wt, pair.revisions.base_sha),
+                                      ("head", head_wt, pair.revisions.head_sha)):
+                _install_frozen_tests(wt, tests_rel, frozen)
+                suites.append(run_suite(wt, tests_rel, suite_hash, python, revision, sha, settings))
 
         comparisons, probed = [], set()
-        for probe_file in sorted((frozen / "probes").glob("*.json")):
-            spec = json.loads(probe_file.read_text())
-            b = run_probe_configured(base_wt, settings.probe_runner, frozen_runner, probe_file, python)
-            h = run_probe_configured(head_wt, settings.probe_runner, frozen_runner, probe_file, python)
-            outcome = classify(b, h)
-            probe_hash = "sha256:" + _sha8(probe_file.read_text())
-            reruns = None
-            if outcome == Outcome.SAME_ON_TESTED_CASES and spec["id"] in prior_deltas:
-                # same probe, now clean: link it to the earlier delta it resolves.
-                # The hash guard keeps this honest: only the unchanged probe counts.
-                if prior_deltas[spec["id"]] == probe_hash:
-                    reruns = spec["id"]
-                    notes.append(
-                        f"probe '{spec['id']}' now reports {outcome} against the earlier "
-                        f"delta it resolves (same probe bytes, hash {probe_hash})."
-                    )
-                else:
-                    notes.append(
-                        f"probe '{spec['id']}' changed bytes since the earlier delta, so this run "
-                        "is NOT linked to it: a rerun must use the unchanged probe."
-                    )
-            comparisons.append(
-                _comparison(probe_file, spec, pair, b, h, outcome, settings, reruns=reruns)
-            )
-            target_path, target_symbol = _target_ref(spec, settings)
-            probed.add((target_path, target_symbol))
+        if frozen_runner is not None:
+            for probe_file in sorted((frozen / "probes").glob("*.json")):
+                spec = json.loads(probe_file.read_text())
+                b = run_probe_configured(base_wt, settings.probe_runner, frozen_runner, probe_file, python)
+                h = run_probe_configured(head_wt, settings.probe_runner, frozen_runner, probe_file, python)
+                outcome = classify(b, h)
+                probe_hash = "sha256:" + _sha8(probe_file.read_text())
+                reruns = None
+                if outcome == Outcome.SAME_ON_TESTED_CASES and spec["id"] in prior_deltas:
+                    # same probe, now clean: link it to the earlier delta it resolves.
+                    # The hash guard keeps this honest: only the unchanged probe counts.
+                    if prior_deltas[spec["id"]] == probe_hash:
+                        reruns = spec["id"]
+                        notes.append(
+                            f"probe '{spec['id']}' now reports {outcome} against the earlier "
+                            f"delta it resolves (same probe bytes, hash {probe_hash})."
+                        )
+                    else:
+                        notes.append(
+                            f"probe '{spec['id']}' changed bytes since the earlier delta, so this run "
+                            "is NOT linked to it: a rerun must use the unchanged probe."
+                        )
+                comparisons.append(
+                    _comparison(probe_file, spec, pair, b, h, outcome, settings, reruns=reruns)
+                )
+                target_path, target_symbol = _target_ref(spec, settings)
+                probed.add((target_path, target_symbol))
 
     resolved_impact = impact or analyze(pair, settings.max_hops, settings)
     return suites, comparisons, needs_bob_action(resolved_impact, probed), notes
