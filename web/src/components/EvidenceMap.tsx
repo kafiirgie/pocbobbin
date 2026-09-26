@@ -5,16 +5,19 @@ import {
   type EdgeProps, type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { FlaskConical, PanelRightOpen, RotateCcw } from "lucide-react";
+import { CircleAlert, FileCode, FlaskConical, Folder, PanelRightOpen, RotateCcw } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { StatusBadge, STATUS_META, TONE_CLASSES } from "@/components/StatusBadge";
+import { TierBadge } from "@/components/TierBadge";
 import { STATUS_PRIORITY } from "@/lib/evidence";
 import {
   buildEvidenceMap, UNKNOWN_EDGE_DASH,
-  type CallFlowEdge, type EvidenceFlowNode, type MapNode, type TestsFlowNode,
+  type CallFlowEdge, type EvidenceFlowNode, type GroupFlowNode, type MapNode, type TestsFlowNode,
 } from "@/lib/evidence-map";
+import type { PortPlacement } from "@/lib/nested-layout";
 import type { ReviewReport } from "@/lib/review-report";
 import { cn } from "@/lib/utils";
 
@@ -26,14 +29,28 @@ interface EvidenceMapProps {
 const MINIMAP_FROM_NODES = 8;
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+/** One handle per ELK port, so each edge enters or leaves at its own point instead of one trunk. */
+function PortHandles({ ports }: { ports: PortPlacement[] }) {
+  return ports.map((port) => (
+    <Handle
+      key={port.id}
+      id={port.id}
+      type={port.side === "left" ? "target" : "source"}
+      position={port.side === "left" ? Position.Left : Position.Right}
+      className="opacity-0"
+      style={{ top: port.offset }}
+    />
+  ));
+}
+
 function EvidenceNodeCard({ data }: NodeProps<EvidenceFlowNode>) {
   const { node } = data;
   const tone = STATUS_META[node.status].tone;
   const others = node.statuses.filter((status) => status !== node.status);
   const label = `${node.ref.symbol} in ${node.ref.path}: ${node.statuses.map((s) => STATUS_META[s].label).join(", ")}`;
   return (
-    <Card className={cn("w-60 gap-1 border-2 p-2 shadow-sm", TONE_CLASSES[tone])}>
-      <Handle type="target" position={Position.Left} className="opacity-0" />
+    <Card className={cn("h-24 w-60 gap-1 border-2 p-2 shadow-sm", TONE_CLASSES[tone])}>
+      <PortHandles ports={data.ports} />
       <div className="flex items-start gap-1">
         <span className="min-w-0 flex-1 truncate font-mono text-sm font-semibold text-foreground">{node.ref.symbol}</span>
         <Button variant="ghost" size="icon-xs" className="nodrag" aria-label={`${label}. Open details`}>
@@ -47,7 +64,6 @@ function EvidenceNodeCard({ data }: NodeProps<EvidenceFlowNode>) {
         <StatusBadge status={node.status} />
         {others.length ? <span className="text-xs text-muted-foreground">+{others.length}</span> : null}
       </span>
-      <Handle type="source" position={Position.Right} className="opacity-0" />
     </Card>
   );
 }
@@ -55,7 +71,8 @@ function EvidenceNodeCard({ data }: NodeProps<EvidenceFlowNode>) {
 function TestsNodeCard({ data }: NodeProps<TestsFlowNode>) {
   const count = data.tests.length;
   return (
-    <Card className={cn("w-60 gap-1 border-2 border-dashed p-2 shadow-sm", TONE_CLASSES.neutral)}>
+    <Card className={cn("h-24 w-60 gap-1 border-2 border-dashed p-2 shadow-sm", TONE_CLASSES.neutral)}>
+      <PortHandles ports={data.ports} />
       <span className="flex items-center gap-1 text-sm font-semibold text-foreground">
         <FlaskConical aria-hidden="true" className="size-4" />
         {count} test{count === 1 ? "" : "s"} call <span className="truncate font-mono">{data.target.symbol}</span>
@@ -63,8 +80,30 @@ function TestsNodeCard({ data }: NodeProps<TestsFlowNode>) {
       <Button variant="outline" size="xs" className="nodrag w-fit" aria-label={`Show the ${count} test callers of ${data.target.symbol}`}>
         Show tests
       </Button>
-      <Handle type="source" position={Position.Right} className="opacity-0" />
     </Card>
+  );
+}
+
+function FolderGroup({ data }: NodeProps<GroupFlowNode>) {
+  return (
+    <div className="size-full rounded-lg bg-muted/60" aria-label={`Folder ${data.path}`}>
+      <span className="flex items-center gap-1 px-3 pt-2 text-xs font-medium text-muted-foreground">
+        <Folder aria-hidden="true" className="size-3.5" />
+        {data.label}
+      </span>
+    </div>
+  );
+}
+
+function FileGroup({ data }: NodeProps<GroupFlowNode>) {
+  return (
+    <div className="size-full rounded-md border bg-card/80" aria-label={`File ${data.path}`}>
+      <span className="flex items-center gap-2 px-3 pt-2 text-xs font-medium">
+        <FileCode aria-hidden="true" className="size-3.5 text-muted-foreground" />
+        <span className="truncate">{data.label}</span>
+        {data.support ? <TierBadge support={data.support} /> : null}
+      </span>
+    </div>
   );
 }
 
@@ -87,7 +126,7 @@ function CallEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targ
   );
 }
 
-const nodeTypes = { evidence: EvidenceNodeCard, tests: TestsNodeCard };
+const nodeTypes = { evidence: EvidenceNodeCard, tests: TestsNodeCard, folder: FolderGroup, file: FileGroup };
 const edgeTypes = { call: CallEdge };
 
 function Legend() {
@@ -108,20 +147,38 @@ function Legend() {
 
 function Canvas({ report, onSelect }: EvidenceMapProps) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
-  const layout = useMemo(() => buildEvidenceMap(report, expanded), [report, expanded]);
-  const [nodes, setNodes, onNodesChange] = useNodesState<MapNode>(layout.nodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<CallFlowEdge>(layout.edges);
+  const [layoutRun, setLayoutRun] = useState(0);
+  const [error, setError] = useState<string>();
+  const [nodes, setNodes, onNodesChange] = useNodesState<MapNode>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<CallFlowEdge>([]);
   const { fitView } = useReactFlow();
 
-  const refit = useCallback(() => {
-    requestAnimationFrame(() => fitView({ padding: 0.2, maxZoom: 1, duration: reducedMotion() ? 0 : 200 }));
-  }, [fitView]);
-  const resetLayout = useCallback(() => {
-    setNodes(layout.nodes);
-    setEdges(layout.edges);
-    refit();
-  }, [layout, setNodes, setEdges, refit]);
-  useEffect(resetLayout, [resetLayout]);
+  useEffect(() => {
+    let current = true;
+    buildEvidenceMap(report, expanded)
+      .then((layout) => {
+        if (!current) return;
+        setNodes(layout.nodes);
+        setEdges(layout.edges);
+        requestAnimationFrame(() => fitView({ padding: 0.15, maxZoom: 1, duration: reducedMotion() ? 0 : 200 }));
+      })
+      .catch((err: unknown) => current && setError(err instanceof Error ? err.message : String(err)));
+    return () => {
+      current = false;
+    };
+  }, [report, expanded, layoutRun, setNodes, setEdges, fitView]);
+  const resetLayout = useCallback(() => setLayoutRun((run) => run + 1), []);
+  const leafCount = useMemo(() => nodes.filter((n) => n.type === "evidence" || n.type === "tests").length, [nodes]);
+
+  if (error) {
+    return (
+      <Alert variant="destructive" className="m-4 w-auto">
+        <CircleAlert aria-hidden="true" />
+        <AlertTitle>The map could not be laid out</AlertTitle>
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    );
+  }
 
   const toggleTests = (targetKey: string) =>
     setExpanded((current) => {
@@ -138,16 +195,17 @@ function Canvas({ report, onSelect }: EvidenceMapProps) {
       edgeTypes={edgeTypes}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
-      onNodeClick={(_, node) => (node.type === "tests" ? toggleTests(node.data.targetKey) : onSelect(node.id))}
+      onNodeClick={(_, node) => {
+        if (node.type === "tests") toggleTests(node.data.targetKey);
+        else if (node.type === "evidence") onSelect(node.id);
+      }}
       nodesConnectable={false}
-      fitView
-      fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
-      minZoom={0.2}
-      defaultEdgeOptions={{ style: { strokeWidth: 2 } }}
+      minZoom={0.1}
+      defaultEdgeOptions={{ style: { strokeWidth: 2 }, zIndex: 1 }}
     >
       <Background />
       <Controls showInteractive={false} />
-      {nodes.length >= MINIMAP_FROM_NODES ? <MiniMap pannable zoomable ariaLabel="Map overview" /> : null}
+      {leafCount >= MINIMAP_FROM_NODES ? <MiniMap pannable zoomable ariaLabel="Map overview" /> : null}
       <Panel position="top-right" className="flex gap-2">
         {expanded.size ? (
           <Button variant="outline" size="sm" onClick={() => setExpanded(new Set())}>

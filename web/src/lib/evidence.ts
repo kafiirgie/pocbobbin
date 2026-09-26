@@ -1,4 +1,6 @@
-import { symbolKey, type Comparison, type Decision, type ReviewReport, type SymbolRef } from "@/lib/review-report";
+import {
+  symbolKey, type Comparison, type Decision, type LanguageSupport, type ReviewReport, type SymbolRef,
+} from "@/lib/review-report";
 
 // Evidence states, strongest first (FINAL_PLAN §16.2). A node shows the strongest as its status
 // and the rest as badges. Nothing here is inferred beyond what the report states.
@@ -110,6 +112,19 @@ export function evidenceNodes(report: ReviewReport): Map<string, EvidenceNode> {
     node.status = strongest(node.statuses);
   }
   return nodes;
+}
+
+// Same extensions as LANGUAGE_DEFAULTS in app/config.py.
+const EXTENSIONS: Record<string, string[]> = {
+  python: [".py"], typescript: [".ts", ".tsx"], javascript: [".js", ".jsx", ".mjs", ".cjs"], java: [".java"],
+  csharp: [".cs"], go: [".go"], cpp: [".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx"], c: [".c", ".h"], rust: [".rs"],
+  php: [".php"], kotlin: [".kt", ".kts"], ruby: [".rb"], swift: [".swift"], dart: [".dart"], bash: [".sh", ".bash"],
+};
+
+/** The analyzed language (and its tier) a file belongs to, chosen only among languages the report lists. */
+export function languageOf(report: ReviewReport, path: string): LanguageSupport | undefined {
+  const languages = report.analysis?.languages.length ? report.analysis.languages : report.analysis ? [report.analysis] : [];
+  return languages.find((support) => (EXTENSIONS[support.language] ?? []).some((ext) => path.endsWith(ext)));
 }
 
 /** The report's own limit sentence for a language below "full" tier, if any. */
