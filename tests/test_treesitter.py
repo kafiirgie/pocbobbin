@@ -356,3 +356,24 @@ def test_mixed_repository_reports_every_language_and_warns_per_weaker_tier(tmp_p
     assert [(s.language, s.tier) for s in report.analysis.languages] == [("python", "full"), ("typescript", "static_probe")]
     warnings = [limit for limit in report.limits if "is supported at tier" in limit]
     assert len(warnings) == 1 and "'typescript'" in warnings[0]
+
+def test_typescript_caller_found_through_a_parent_relative_import(tmp_path: Path):
+    """`../lib/discount` must resolve; before normalizing `..` it matched no file and the caller was lost."""
+    repo = tmp_path / "parent-relative"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "base")
+    write_files(repo, {
+        "src/lib/discount.ts": "export function applyDiscount(value: number) { return value; }\n",
+        "src/components/invoice.ts": 'import { applyDiscount } from "../lib/discount";\n'
+                                     "export function priceTotal(value: number) { return applyDiscount(value); }\n",
+    })
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "base")
+    git(repo, "checkout", "-q", "-b", "head")
+    write_files(repo, {"src/lib/discount.ts": "export function applyDiscount(value: number) { return value + 1; }\n"})
+    git(repo, "commit", "-qam", "head")
+
+    with open_pair(repo, "base", "head") as pair:
+        impact = analyze(pair)
+
+    assert any(path.render() == "priceTotal → applyDiscount" and path.outside_diff for path in impact.paths)

@@ -50,6 +50,7 @@ pip install -e ".[dev]"
 pytest -q
 behavior-review --base main --head HEAD --run --json report.json --markdown report.md
 behavior-review --base ref/base --head origin/scenario1-head --run --json report.json   # demo
+behavior-review map --ref HEAD --out repo_map.json   # whole-repo module map (lane E)
 ```
 
 Web viewer (from `web/`): `npm install`, `npm run dev`, `npm run typecheck`, `npm run build`.
