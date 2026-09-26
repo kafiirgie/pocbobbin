@@ -10,6 +10,7 @@ import json
 import sys
 from pathlib import Path
 
+from app.config import ConfigError, load_config
 from app.decisions import lookup
 from app.impact import analyze
 from app.report import render_markdown
@@ -21,7 +22,7 @@ from app.snapshot import SnapshotError, open_pair
 def _limits(impact: ImpactResult, executed: bool, unprobed: list[SymbolRef]) -> list[str]:
     limits = [
         f"Callers traced up to {impact.max_hops} hops; deeper callers are not shown.",
-        "Impact is static (AST): calls through variables, dynamic dispatch or class hierarchies may be missed. "
+        "Impact is static parser analysis: calls through variables, dynamic dispatch or class hierarchies may be missed. "
         "Unresolved references that could reach a changed symbol are listed as unknowns, not as safe.",
     ]
     if executed:
@@ -54,7 +55,7 @@ def _prior_decisions(pair: RevisionPair, impact: ImpactResult) -> list[Decision]
     ]
 
 
-def pipeline(repo: str | Path, base: str, head: str, max_hops: int = 2, run: bool = False,
+def pipeline(repo: str | Path, base: str, head: str, max_hops: int | None = None, run: bool = False,
              prior_report: str | Path | None = None) -> ReviewReport:
     """Snapshot → impact → prior decisions → (with `run`) paired execution of the frozen suite and probes.
 
@@ -62,10 +63,13 @@ def pipeline(repo: str | Path, base: str, head: str, max_hops: int = 2, run: boo
     delta and now reports no delta to that earlier delta, via `Comparison.reruns`.
     """
     with open_pair(repo, base, head) as pair:
-        impact = analyze(pair, max_hops)
+        config = load_config(pair.root)
+        effective_hops = config.max_hops if max_hops is None else max_hops
+        impact = analyze(pair, effective_hops, config)
         prior = _prior_decisions(pair, impact)
         suites, comparisons, missing, notes = (
-            compare(pair, impact=impact, prior_report=prior_report) if run else ([], [], [], [])
+            compare(pair, impact=impact, config=config, prior_report=prior_report)
+            if run else ([], [], [], [])
         )
     return ReviewReport(
         repo=pair.repo,
@@ -140,7 +144,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo", default=".", help="Path inside the git repository (default: .)")
     parser.add_argument("--base", default="main", help="Base revision (default: main)")
     parser.add_argument("--head", default="HEAD", help="Head revision (default: HEAD)")
-    parser.add_argument("--max-hops", type=int, default=2, help="Caller levels to trace back (default: 2)")
+    parser.add_argument("--max-hops", type=int, default=None, help="Caller levels to trace back (default: behavior.json or 2)")
     parser.add_argument("--json", type=Path, help="Write the ReviewReport JSON here instead of stdout")
     parser.add_argument("--markdown", type=Path, help="Also write the report as Markdown (the PR comment body) here")
     parser.add_argument(
@@ -174,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report = pipeline(args.repo, args.base, args.head, args.max_hops, run=args.run,
                           prior_report=args.prior_report)
-    except SnapshotError as exc:
+    except (SnapshotError, ConfigError, RuntimeError) as exc:
         print(f"behavior-review: {exc}", file=sys.stderr)
         return 2
     report.links = dict(args.link)

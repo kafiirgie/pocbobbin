@@ -140,13 +140,55 @@ approve nothing.
 - **Tested cases only.** `same_on_tested_cases` means identical output for the frozen inputs, not
   proof of equivalence for all inputs.
 - **Honest failures.** Setup errors, import errors and timeouts are `inconclusive`, never "bug".
-- **Scope.** Python only; the probe harness targets pure, deterministic functions.
+- **Scope.** Static support covers the configured language adapters; real behavior evidence still
+  depends on the repository's installed toolchain and committed deterministic probes.
 
 ## Run the tests
 
 ```bash
 pytest -q
 ```
+
+### Optional multi-language analysis
+
+Python remains the default and requires no configuration file. A repository can opt into the
+Tree-sitter adapters with the optional dependencies:
+
+```bash
+pip install -e ".[dev,multilang]"
+```
+
+The adapter registry currently accepts Python, TypeScript, JavaScript, Java, C#, Go, C++, C,
+Rust, PHP, Kotlin, Ruby, Swift, Dart, and Bash. Full support for a language still requires a
+real repository/toolchain fixture and process-output verification in CI.
+Add `behavior.json` at the repository root to select one language and its real test/probe
+commands. Commands are argument arrays, not shell strings:
+
+```json
+{
+  "language": "typescript",
+  "extensions": [".ts", ".tsx", ".js"],
+  "tests_dir": "tests",
+  "test_command": ["npx", "vitest", "run", "--reporter=json"],
+  "test_report": "vitest-json",
+  "probe_runner": ["npx", "tsx", "tools/run_probe.ts"],
+  "test_file_patterns": ["*.test.ts", "*.spec.ts"],
+  "max_hops": 2
+}
+```
+
+The adapter resolves direct, statically visible calls. Dynamic dispatch, reflection, unresolved
+imports, generated code, macros, and unsupported build behavior remain unknown or inconclusive;
+they are never treated as proof of no impact. The configured runtime and build tool must be
+installed by the reviewed repository. TypeScript/JavaScript probes can use
+`tools/run_probe.ts`; compiled-language repositories can use `tools/run_command_probe.py` with a
+probe `command` array and `{input}` placeholder.
+
+Language-specific test report names include `pytest-text`, `vitest-json`, `junit-xml`, `trx-xml`,
+`go-test-json`, `ctest-text`, `cargo-text`, `phpunit-text`, `rspec-json`, `swift-text`,
+`dart-json`, and `shell-text`. An unparseable report is inconclusive rather than a passing
+result. Every configured language has an explicit entry in `app/adapters/registry.py`; the
+Tree-sitter implementation is shared, but language selection is not implicit.
 
 ## License
 
