@@ -429,6 +429,52 @@ def _analyze_python(pair: RevisionPair, max_hops: int = 2) -> ImpactResult:
     )
 
 
+def _merge_impact_results(results: list[ImpactResult], max_hops: int) -> ImpactResult:
+    """Merge independent language graphs from a mixed-language repository.
+
+    Adapters only claim edges they can resolve within their language. We merge
+    their evidence without inventing cross-language calls; unresolved edges
+    remain unknowns rather than becoming false-safe paths.
+    """
+    changed: dict[str, ChangedSymbol] = {}
+    edges: dict[tuple[str, str], Edge] = {}
+    paths: dict[tuple[tuple[str, str, int], ...], ImpactPath] = {}
+    unknowns: list[Unknown] = []
+
+    for result in results:
+        for item in result.changed_symbols:
+            existing = changed.get(item.key)
+            if existing is None:
+                changed[item.key] = item.model_copy(deep=True)
+                continue
+            existing.tags = list(dict.fromkeys([*existing.tags, *item.tags]))
+            existing.base_line = existing.base_line or item.base_line
+            existing.head_line = existing.head_line or item.head_line
+
+        for edge in result.edges:
+            key = (edge.caller.key, edge.callee.key)
+            existing = edges.get(key)
+            if existing is None:
+                edges[key] = edge.model_copy(deep=True)
+            else:
+                existing.revisions = list(dict.fromkeys([*existing.revisions, *edge.revisions]))
+                if Revision.HEAD in edge.revisions:
+                    existing.line = edge.line
+
+        for path in result.paths:
+            key = tuple((hop.path, hop.symbol, hop.line) for hop in path.hops)
+            paths.setdefault(key, path.model_copy(deep=True))
+        unknowns.extend(item.model_copy(deep=True) for item in result.unknowns)
+
+    return ImpactResult(
+        changed_symbols=sorted(changed.values(), key=lambda item: item.key),
+        edges=sorted(edges.values(), key=lambda item: (item.callee.key, item.caller.key)),
+        paths=sorted(paths.values(), key=lambda item: (not item.outside_diff, item.is_test, len(item.hops), item.render())),
+        unknowns=_dedupe_unknowns(unknowns),
+        max_hops=max_hops,
+    )
+
+
 def analyze(
     pair: RevisionPair,
     max_hops: int | None = None,
@@ -444,5 +490,12 @@ def analyze(
 
     settings = config or load_config(pair.root)
     effective_hops = settings.max_hops if max_hops is None else max_hops
-    adapter = get_adapter(settings.language)
-    return adapter.analyze(pair, effective_hops, settings)
+    if len(settings.languages) == 1:
+        adapter = get_adapter(settings.language)
+        return adapter.analyze(pair, effective_hops, settings)
+
+    results = [
+        get_adapter(language).analyze(pair, effective_hops, settings.for_language(language))
+        for language in settings.languages
+    ]
+    return _merge_impact_results(results, effective_hops)
