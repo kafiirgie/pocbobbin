@@ -244,7 +244,7 @@ behavior-review/
 | Part | What it uses |
 |---|---|
 | Engine (required) | Python ≥ 3.11 (uses `StrEnum`), stdlib `ast`, `git` via subprocess, **Pydantic** — the only required dependency |
-| Multi-language (optional) | `tree-sitter` + `tree-sitter-language-pack`, installed with `pip install ".[multilang]"` |
+| Multi-language | `tree-sitter` + `tree-sitter-language-pack`, required since #23 (languages are auto-detected when there is no `behavior.json`) |
 | Test/probe execution | Each language's own runner, called as an argv command (pytest, Vitest, or what `behavior.json` configures) |
 | Web | React 18 + Vite + TypeScript + Tailwind v4, shadcn-style components in `web/src/components/ui/` |
 | Maps (Lane E, new) | **React Flow (`@xyflow/react`)** with group nodes (folder → file → function) + **ELK (`elkjs`)** for nested layout, lazy-loaded — `TODO(C)`: approve the two dependencies in `web/package.json`. (Not dagre: React Flow's docs note dagre mis-lays sub-flows whose nodes connect outside the group — exactly our cross-folder case.) |
@@ -269,7 +269,7 @@ A approves any shared schema change and tells affected owners.
 
 ### GitHub Action (sketch)
 
-On `pull_request` (opened, synchronize, reopened): checkout with full history → `pip install -e .` → `behavior-review --base origin/${{ github.base_ref }} --head HEAD --format markdown --out report.md --json report.json` → upload `report.json` as artifact → create/update **one** PR comment. Permissions: `contents: read`, `pull-requests: write`. The Action **reuses committed probes**; it never calls Bob. If an impacted caller has no probe, the report says `needs_bob_action` — the author runs `/behavior-review` in Bob IDE to create one.
+On `pull_request` (opened, synchronize, reopened): checkout with full history → `pip install -e .` → `behavior-review --base origin/${{ github.base_ref }} --head HEAD --run --link action_run=<run URL> --json report.json` (`--markdown report.md` is also available) → `behavior-review map --ref HEAD --out repo_map.json` → upload `report.json` + `repo_map.json` as one artifact → create/update **one** PR comment. Permissions: `contents: read`, `pull-requests: write`. The Action **reuses committed probes**; it never calls Bob. If an impacted caller has no probe, the report says `needs_bob_action` — the author runs `/behavior-review` in Bob IDE to create one.
 
 ---
 
@@ -511,7 +511,7 @@ Lane E creates only new files. Everything below touches another lane's files and
 | `TODO(C)-5` | C | UI refresh with shadcn/ui (rules in §16.6; prompt in `handoffs/C.md` or the team chat); define theme tokens first so the maps use the same colors | Consistent look | [ ] |
 | `TODO(A)-1` | A | Add the `map` subcommand in `cli.py` calling `repo_map.build` (E writes the function) | CLI entry | [x] `behavior-review map --ref HEAD --out repo_map.json` |
 | `TODO(A)-2` | A | Expose a small public function for import parsing/resolution in `impact_treesitter.py` (today `_parse_language_imports` / `_resolve_import` are private) | Reuse adapters, no copy-paste | [x] `import_graph()` in both `impact.py` and `impact_treesitter.py`, returning `ImportRef`s |
-| `TODO(A)-3` | A | Check name-based call matching for false edges (e.g. the PHP fixture calls `apply($value)` inside a class — in PHP that is a global function, not `$this->apply`) | Maps must not draw edges that don't exist | [ ] |
+| `TODO(A)-3` | A | Check name-based call matching for false edges (e.g. the PHP fixture calls `apply($value)` inside a class — in PHP that is a global function, not `$this->apply`) | Maps must not draw edges that don't exist | [x] bare calls resolve to a sibling method only in implicit-receiver languages; PHP `$this->`/`static::` now resolve (#24) |
 | `TODO(D)-1` | D | Action also runs `behavior-review map` and uploads `repo_map.json` as an artifact | Real, linkable map data | [x] same artifact as `report.json` |
 | `TODO(D)-2` | D | Add the `CHANGE_NOTES.md` instructions (E's template) to `.bob/custom_modes.yaml` | P1.5 | [ ] |
 | `TODO(B)-1` | B | Confirm `comparisons[].probe.target` always matches the `SymbolRef` used in `impact` (same path + symbol spelling) — **for every supported language**, e.g. Tree-sitter's `Discount.apply` in Java (§19 row 9) | Map joins outcomes to nodes by that key | [ ] |
@@ -542,7 +542,7 @@ Lane E creates only new files. Everything below touches another lane's files and
 
 ## 17. Multi-language support (current state)
 
-Based on reading the repo code on 26 Sept (`app/adapters/registry.py`, `app/impact_treesitter.py`, `tests/test_treesitter.py`, `MULTI_LANGUAGE_IMPLEMENTATION_PLAN.md`). **Not yet confirmed by running the full test suite** — the scenario tests need the `origin/base` ref, which was missing in that checkout.
+Based on reading the repo code on 26 Sept (`app/adapters/registry.py`, `app/impact_treesitter.py`, `tests/test_treesitter.py`, `MULTI_LANGUAGE_IMPLEMENTATION_PLAN.md`). **Confirmed by running the full suite on 26 Sept evening:** 109 passed with the `multilang` extra installed (the Tree-sitter tests skip without it). The scenario "before" revision is the `ref/base` tag.
 
 How it works:
 - A repo may add a root **`behavior.json`** (language, file extensions, test command, test reporter, probe runner, max hops). Without it, Python defaults apply.
@@ -593,15 +593,15 @@ Add `tier` to `AdapterSpec` in `app/adapters/registry.py` (values: `full`, `stat
 }
 ```
 
-A announces the change, updates `contracts/` fixtures and `tests/test_contracts.py` in the same commit (rule §10.2). `config_source` is `"behavior.json"` or `"defaults"`.
+A announces the change, updates `contracts/` fixtures and `tests/test_contracts.py` in the same commit (rule §10.2). `config_source` is `"behavior.json"`, `"detected"` (auto-detection, #23) or `"defaults"`; both the file and detection come from the base revision. **As built (#24):** the fields above describe the primary language, and `analysis.languages` lists every adapter that ran (`language`, `adapter`, `tier`) for mixed repositories; limits warn once per language below `full`.
 
 ### 19.3 Consistency matrix
 
 | # | Layer | Must be true for every language | Today (code reading) | Owner / TODO |
 |---|---|---|---|---|
-| 1 | Adapter registry | Each adapter declares its tier | No tier field | **`TODO(A)-4`** add `AdapterSpec.tier` |
-| 2 | Report | Report says which language/adapter/tier produced it | No such field | **`TODO(A)-5`** fill `report.analysis` (§19.2) |
-| 3 | Limits text | Non-`full` tiers add a plain warning, e.g. "Kotlin support is experimental: same-file callers only; treat missing paths as unknown" | Generic limits only | **`TODO(A)-6`** in `cli._limits` |
+| 1 | Adapter registry | Each adapter declares its tier | ✅ `AdapterSpec.tier` (#24) | ~~`TODO(A)-4`~~ done |
+| 2 | Report | Report says which language/adapter/tier produced it | ✅ `report.analysis` (#24) | ~~`TODO(A)-5`~~ done |
+| 3 | Limits text | Non-`full` tiers add a plain warning, e.g. "Kotlin support is experimental: same-file callers only; treat missing paths as unknown" | ✅ tier warning from `TIER_LIMITS` (#24) | ~~`TODO(A)-6`~~ done |
 | 4 | Test execution | Unknown/unsupported test reporter → suite result **inconclusive**, never counted as passing | Parsers: pytest text, Vitest JSON only | **`TODO(B)-2`** verify + test this for a Go/Java config |
 | 5 | Probe harness | Each tier ≥ `static_probe` has a documented probe format (`run_probe.py`, `run_probe.ts`, `command` via `run_command_probe.py`) | Harnesses exist; formats not in one doc | **`TODO(B)-3`** one table in README: language → probe format + example |
 | 6 | GitHub Action | Reads `behavior.json`; installs `.[multilang]` when language ≠ python; sets up the needed toolchain (Node, Go, JDK…); **no `\|\| true`** that hides install errors; tool install works for a repo that isn't this one (pinned git URL) | Python 3.11 only, no `[multilang]`, no other toolchains, `\|\| true` present | **`TODO(D)-3`** |
