@@ -40,6 +40,13 @@ export function verdictCounts(report: ReviewReport): VerdictCounts {
   };
 }
 
+export interface CallSite {
+  caller: SymbolRef;
+  callee: SymbolRef;
+  /** Line of the call in the caller's file. */
+  line: number;
+}
+
 export interface EvidenceNode {
   key: string;
   ref: SymbolRef;
@@ -49,6 +56,8 @@ export interface EvidenceNode {
   isTest: boolean;
   comparisons: Comparison[];
   decisions: Decision[];
+  calledBy: CallSite[];
+  calls: CallSite[];
 }
 
 function strongest(statuses: EvidenceStatus[]): EvidenceStatus {
@@ -67,7 +76,7 @@ export function evidenceNodes(report: ReviewReport): Map<string, EvidenceNode> {
     }
     const created: EvidenceNode = {
       key, ref: { path: ref.path, symbol: ref.symbol }, line, status: "outside_diff", statuses: [],
-      isTest: false, comparisons: [], decisions: [],
+      isTest: false, comparisons: [], decisions: [], calledBy: [], calls: [],
     };
     nodes.set(key, created);
     return created;
@@ -85,6 +94,11 @@ export function evidenceNodes(report: ReviewReport): Map<string, EvidenceNode> {
   const changed = new Set(report.impact.changed_symbols.map(symbolKey));
   const changedFiles = new Set(report.revisions.changed_files);
   const needsProbe = new Set(report.needs_bob_action.map(symbolKey));
+  for (const edge of report.impact.edges) {
+    const site: CallSite = { caller: edge.caller, callee: edge.callee, line: edge.line };
+    nodes.get(symbolKey(edge.caller))?.calls.push(site);
+    nodes.get(symbolKey(edge.callee))?.calledBy.push(site);
+  }
   for (const node of nodes.values()) {
     node.comparisons = report.comparisons.filter((c) => symbolKey(c.probe.target) === node.key);
     node.decisions = [...report.decisions, ...report.prior_decisions].filter((d) => symbolKey(d.target) === node.key);

@@ -61,6 +61,24 @@ export function NodeDetailsSheet({ node, onOpenChange }: NodeDetailsSheetProps) 
                 )}
               </section>
               <Separator />
+              <section aria-label="Call sites" className="space-y-2 py-4">
+                <h3 className="font-medium">Call sites</h3>
+                {node.calledBy.length || node.calls.length ? (
+                  <ul className="space-y-1 text-sm">
+                    {node.calledBy.map((site) => (
+                      <li key={`in:${site.caller.path}:${site.line}`}>
+                        Called by <code>{site.caller.symbol}</code> at <code className="break-all">{site.caller.path}:{site.line}</code>
+                      </li>
+                    ))}
+                    {node.calls.map((site) => (
+                      <li key={`out:${site.callee.path}:${site.callee.symbol}`}>
+                        Calls <code>{site.callee.symbol}</code> at <code className="break-all">{site.caller.path}:{site.line}</code>
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p className="text-sm text-muted-foreground">No resolved call sites for this symbol.</p>}
+              </section>
+              <Separator />
               <section aria-label="Decisions" className="space-y-3 py-4">
                 <h3 className="font-medium">Decisions</h3>
                 {node.decisions.length ? node.decisions.map((decision) => (

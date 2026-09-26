@@ -1,7 +1,7 @@
 import { Graph, layout } from "@dagrejs/dagre";
 import { MarkerType, type Edge, type Node } from "@xyflow/react";
 import { evidenceNodes, type EvidenceNode } from "@/lib/evidence";
-import { symbolKey, type ReviewReport } from "@/lib/review-report";
+import { symbolKey, type ReviewReport, type SymbolRef } from "@/lib/review-report";
 
 // Layout box per node, in React Flow's canvas units (not CSS pixels on the page).
 export const NODE_WIDTH = 240;
@@ -9,72 +9,88 @@ export const NODE_HEIGHT = 96;
 /** SVG dash pattern that marks an unknown (unresolved) edge; the legend uses the same value. */
 export const UNKNOWN_EDGE_DASH = "6 4";
 
-export type EvidenceFlowNode = Node<{ node: EvidenceNode; onSelect?: (key: string) => void }, "evidence">;
+export type EvidenceFlowNode = Node<{ node: EvidenceNode }, "evidence">;
+export type TestsFlowNode = Node<{ targetKey: string; target: SymbolRef; tests: EvidenceNode[] }, "tests">;
+export type MapNode = EvidenceFlowNode | TestsFlowNode;
+export type CallFlowEdge = Edge<{ tooltip: string; unknown: boolean }, "call">;
 
 export interface EvidenceMapData {
-  nodes: EvidenceFlowNode[];
-  edges: Edge[];
-  /** Test callers left out of the map when `showTests` is off; the UI always states this count. */
-  hiddenTests: number;
+  nodes: MapNode[];
+  edges: CallFlowEdge[];
 }
 
-/** Callers → changed symbols, left to right; unknown references are dashed and never dropped. */
-export function buildEvidenceMap(report: ReviewReport, showTests: boolean): EvidenceMapData {
+const testsId = (targetKey: string) => `tests:${targetKey}`;
+
+function callEdge(source: string, target: string, tooltip: string, unknown = false): CallFlowEdge {
+  return {
+    id: `${unknown ? "unknown" : "call"}:${source}->${target}`,
+    source,
+    target,
+    type: "call",
+    markerEnd: { type: MarkerType.ArrowClosed },
+    ariaLabel: tooltip,
+    data: { tooltip, unknown },
+  };
+}
+
+/**
+ * Callers → changed symbols, left to right. Test callers of one symbol collapse into a single
+ * "N tests call X" node unless that symbol is in `expandedTests`; unknown references stay as edges.
+ */
+export function buildEvidenceMap(report: ReviewReport, expandedTests: ReadonlySet<string>): EvidenceMapData {
   const all = evidenceNodes(report);
-  const hidden = showTests ? [] : [...all.values()].filter((node) => node.isTest);
-  const hiddenKeys = new Set(hidden.map((node) => node.key));
-  const evidence = new Map([...all].filter(([key]) => !hiddenKeys.has(key)));
-  const edges: Edge[] = report.impact.edges
-    .filter((edge) => evidence.has(symbolKey(edge.caller)) && evidence.has(symbolKey(edge.callee)))
-    .map((edge) => ({
-      id: `call:${symbolKey(edge.caller)}->${symbolKey(edge.callee)}`,
-      source: symbolKey(edge.caller),
-      target: symbolKey(edge.callee),
-      type: "smoothstep",
-      markerEnd: { type: MarkerType.ArrowClosed },
-      ariaLabel: `${edge.caller.symbol} calls ${edge.callee.symbol} at line ${edge.line}`,
-    }));
-  report.impact.unknowns.forEach((unknown, index) => {
+  const edges: CallFlowEdge[] = [];
+  const testsByTarget = new Map<string, EvidenceNode[]>();
+  const shown = new Set<string>();
+
+  for (const edge of report.impact.edges) {
+    const caller = all.get(symbolKey(edge.caller));
+    const targetKey = symbolKey(edge.callee);
+    if (!caller || !all.has(targetKey)) continue;
+    shown.add(targetKey);
+    if (caller.isTest && !expandedTests.has(targetKey)) {
+      testsByTarget.set(targetKey, [...(testsByTarget.get(targetKey) ?? []), caller]);
+      continue;
+    }
+    shown.add(caller.key);
+    edges.push(callEdge(caller.key, targetKey, `${edge.caller.symbol} → ${edge.callee.symbol} · call at ${edge.caller.path}:${edge.line}`));
+  }
+  for (const [targetKey, tests] of testsByTarget) {
+    const target = all.get(targetKey)!.ref;
+    edges.push(callEdge(testsId(targetKey), targetKey, `${tests.length} test${tests.length === 1 ? "" : "s"} call ${target.symbol}`));
+  }
+  report.impact.unknowns.forEach((unknown) => {
     const source = symbolKey({ path: unknown.path, symbol: unknown.symbol });
-    if (!evidence.has(source)) return;
-    unknown.may_reach
-      .filter((target) => evidence.has(target))
-      .forEach((target) =>
-        edges.push({
-          id: `unknown:${index}:${target}`,
-          source,
-          target,
-          label: "unknown",
-          type: "smoothstep",
-          markerEnd: { type: MarkerType.ArrowClosed },
-          style: { strokeDasharray: UNKNOWN_EDGE_DASH },
-          ariaLabel: `Unknown edge from ${unknown.symbol}: ${unknown.reason}`,
-        }),
-      );
+    unknown.may_reach.filter((target) => all.has(target)).forEach((target) => {
+      shown.add(source);
+      shown.add(target);
+      edges.push(callEdge(source, target, `Unknown edge: ${unknown.reason} · ${unknown.expression} at ${unknown.path}:${unknown.line}`, true));
+    });
   });
+  all.forEach((node) => node.statuses.includes("changed") && shown.add(node.key));
 
-  const connected = new Set(edges.flatMap((edge) => [edge.source, edge.target]));
-  const shown = [...evidence.values()].filter((node) => connected.has(node.key) || node.statuses.includes("changed"));
+  const nodes: MapNode[] = [
+    ...[...shown].flatMap((key): EvidenceFlowNode[] => {
+      const node = all.get(key);
+      return node ? [{ id: key, type: "evidence", position: { x: 0, y: 0 }, data: { node } }] : [];
+    }),
+    ...[...testsByTarget].map(([targetKey, tests]): TestsFlowNode => ({
+      id: testsId(targetKey), type: "tests", position: { x: 0, y: 0 },
+      data: { targetKey, target: all.get(targetKey)!.ref, tests },
+    })),
+  ];
+  return { nodes: layoutNodes(nodes, edges), edges };
+}
 
+function layoutNodes(nodes: MapNode[], edges: CallFlowEdge[]): MapNode[] {
   const graph = new Graph();
-  graph.setGraph({ rankdir: "LR", nodesep: 24, ranksep: 96 });
+  graph.setGraph({ rankdir: "LR", nodesep: 32, ranksep: 120 });
   graph.setDefaultEdgeLabel(() => ({}));
-  shown.forEach((node) => graph.setNode(node.key, { width: NODE_WIDTH, height: NODE_HEIGHT }));
+  nodes.forEach((node) => graph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT }));
   edges.forEach((edge) => graph.setEdge(edge.source, edge.target));
   layout(graph);
-
-  const nodes: EvidenceFlowNode[] = shown.map((node) => {
-    const { x, y } = graph.node(node.key);
-    return {
-      id: node.key,
-      type: "evidence",
-      position: { x: x - NODE_WIDTH / 2, y: y - NODE_HEIGHT / 2 },
-      data: { node },
-      width: NODE_WIDTH,
-      height: NODE_HEIGHT,
-      focusable: false,
-      draggable: false,
-    };
+  return nodes.map((node) => {
+    const { x, y } = graph.node(node.id);
+    return { ...node, position: { x: x - NODE_WIDTH / 2, y: y - NODE_HEIGHT / 2 } };
   });
-  return { nodes, edges, hiddenTests: hidden.length };
 }
