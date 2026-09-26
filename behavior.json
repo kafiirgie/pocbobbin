@@ -1,0 +1,5 @@
+{
+  "language": "python",
+  "tests_dir": "sample_project/tests",
+  "max_hops": 2
+}
