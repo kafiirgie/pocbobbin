@@ -179,8 +179,27 @@ function normalizeNode(value: unknown, index: number): ImpactNode {
   };
 }
 
+// The engine's ReviewReport path: `hops` run caller first, changed symbol last, and a
+// hop is outside the diff when its file is not in `revisions.changed_files`.
+function normalizeHops(record: UnknownRecord, hops: unknown[], changedFiles: Set<string>): ImpactNode[] {
+  const isTest = record.is_test === true;
+  return hops.map((hop, index) => {
+    const node = normalizeNode(hop, index);
+    const role =
+      index === hops.length - 1
+        ? "changed symbol"
+        : index === 0
+          ? isTest ? "test caller" : "caller"
+          : "intermediate caller";
+    return { ...node, outsideDiff: node.path !== undefined && !changedFiles.has(node.path), role };
+  });
+}
+
 function normalizeImpactPaths(raw: UnknownRecord): ImpactPath[] {
   const impact = asRecord(raw.impact) ?? asRecord(raw.impact_analysis) ?? {};
+  const changedFiles = new Set(
+    firstArray(asRecord(raw.revisions)?.changed_files).map((file) => stringValue(file)),
+  );
   const values = firstArray(
     impact.paths,
     impact.impact_paths,
@@ -200,6 +219,9 @@ function normalizeImpactPaths(raw: UnknownRecord): ImpactPath[] {
       }
 
       const record = asRecord(value) ?? {};
+      if (Array.isArray(record.hops)) {
+        return { id: makeId("path", index, value), nodes: normalizeHops(record, record.hops, changedFiles) };
+      }
       const nodeValues = firstArray(
         record.nodes,
         record.path,
@@ -328,14 +350,18 @@ function normalizeObservations(raw: UnknownRecord): Observation[] {
     const normalizedOutcome = normalizeOutcome(
       readFirst(record, "outcome", "behavior_outcome", "classification", "result", "status", "label"),
     );
+    // ReviewReport comparisons nest the probe's id, input and hash under `probe`.
+    const probe = asRecord(record.probe) ?? {};
     return {
-      id: makeId("observation", index, value),
+      id: makeId("observation", index, probe.id !== undefined ? probe : value),
       name: stringValue(
-        readFirst(record, "name", "probe_name", "probeName", "id"),
+        readFirst(record, "name", "probe_name", "probeName", "id") ?? readFirst(probe, "id", "name"),
         `Probe ${String(index + 1).padStart(2, "0")}`,
       ),
-      input: redactValue(readFirst(record, "input", "probe_input", "probeInput", "args") ?? null),
-      probeHash: optionalString(readFirst(record, "probe_hash", "probeHash", "hash")),
+      input: redactValue(
+        readFirst(record, "input", "probe_input", "probeInput", "args") ?? readFirst(probe, "input") ?? null,
+      ),
+      probeHash: optionalString(readFirst(record, "probe_hash", "probeHash", "hash") ?? readFirst(probe, "hash")),
       base: normalizeOutput(baseValue.present ? baseValue.value : undefined),
       head: normalizeOutput(headValue.present ? headValue.value : undefined),
       outcome: normalizedOutcome.outcome,
@@ -346,7 +372,13 @@ function normalizeObservations(raw: UnknownRecord): Observation[] {
 }
 
 function normalizeChangedSymbols(raw: UnknownRecord): ChangedSymbol[] {
-  return firstCollection(raw.changed_symbols, raw.changedSymbols, raw.symbols, raw.changed).map((value, index) => {
+  return firstCollection(
+    raw.changed_symbols,
+    raw.changedSymbols,
+    raw.symbols,
+    raw.changed,
+    asRecord(raw.impact)?.changed_symbols,
+  ).map((value, index) => {
     const record = asRecord(value) ?? {};
     const tags = firstArray(record.tags, record.change_tags, record.changeTags)
       .map((tag) => stringValue(tag))
@@ -357,7 +389,7 @@ function normalizeChangedSymbols(raw: UnknownRecord): ChangedSymbol[] {
       id: makeId("symbol", index, value),
       path: stringValue(readFirst(record, "path", "file", "relative_path"), "Path not provided"),
       symbol: stringValue(readFirst(record, "symbol", "name", "label"), "Symbol not provided"),
-      line: numberValue(readFirst(record, "line", "line_number", "line_start")),
+      line: numberValue(readFirst(record, "line", "line_number", "line_start", "head_line", "base_line")),
       changeType,
       tags,
     };
@@ -367,15 +399,30 @@ function normalizeChangedSymbols(raw: UnknownRecord): ChangedSymbol[] {
 function normalizeTests(raw: UnknownRecord): TestEvidence {
   const value = readFirst(raw, "tests", "existing_tests", "test_results");
   if (Array.isArray(value)) {
-    const statuses = value.map((item) => normalizeTestStatus(asRecord(item)?.status ?? item));
+    const statuses = value.map((item) => {
+      const record = asRecord(item);
+      // A suite run with failing tests is a failure even though the runner reports it as `error`.
+      if (record && (numberValue(record.failed) ?? 0) > 0) return "failed";
+      return normalizeTestStatus(record?.status ?? item);
+    });
+    const runs = value.flatMap((item) => {
+      const record = asRecord(item);
+      const revision = record && optionalString(record.revision);
+      if (!record || !revision) return [];
+      const counts = ["passed", "failed", "errors"]
+        .map((key) => `${numberValue(record[key]) ?? 0} ${key}`)
+        .join(", ");
+      return [`${revision}: ${stringValue(record.status, "unknown")} (${counts})`];
+    });
+    const perRevision = runs.length ? ` ${runs.join("; ")}.` : "";
     if (statuses.includes("failed")) {
-      return { status: "failed", label: "Existing tests", details: "At least one reported test failed." };
+      return { status: "failed", label: "Existing tests", details: `At least one reported test failed.${perRevision}` };
     }
     if (statuses.includes("inconclusive")) {
-      return { status: "inconclusive", label: "Existing tests", details: "The test result was not conclusive." };
+      return { status: "inconclusive", label: "Existing tests", details: `The test result was not conclusive.${perRevision}` };
     }
     if (statuses.length && statuses.every((status) => status === "passed")) {
-      return { status: "passed", label: "Existing tests", details: "The reported test suite passed." };
+      return { status: "passed", label: "Existing tests", details: `The reported test suite passed.${perRevision}` };
     }
     return { status: "unknown", label: "Existing tests" };
   }
@@ -412,9 +459,15 @@ function normalizeTestStatus(value: unknown): TestStatus {
 }
 
 function normalizeDecisions(raw: UnknownRecord): ReportDecision[] {
-  return firstCollection(raw.decisions, raw.dispositions, raw.decision).flatMap((value, index) => {
+  // Ledger records cited by the engine (`prior_decisions`) keep their own status, e.g. approved.
+  const values = [
+    ...firstCollection(raw.decisions, raw.dispositions, raw.decision),
+    ...firstArray(raw.prior_decisions),
+  ];
+  return values.flatMap((value, index) => {
     const record = asRecord(value);
     if (!record) return [];
+    const target = asRecord(record.target) ?? {};
     const dispositionValue = optionalString(
       readFirst(record, "disposition", "human_disposition", "decision", "intent"),
     )?.toLowerCase();
@@ -423,8 +476,8 @@ function normalizeDecisions(raw: UnknownRecord): ReportDecision[] {
       id: makeId("decision", index, value),
       observationId: optionalString(readFirst(record, "observation_id", "observationId", "observation")),
       probeHash: optionalString(readFirst(record, "probe_hash", "probeHash", "hash")),
-      symbol: optionalString(readFirst(record, "symbol", "qualified_symbol", "name")),
-      path: optionalString(readFirst(record, "path", "file", "relative_path")),
+      symbol: optionalString(readFirst(record, "symbol", "qualified_symbol", "name") ?? readFirst(target, "symbol")),
+      path: optionalString(readFirst(record, "path", "file", "relative_path") ?? readFirst(target, "path")),
       requirement: optionalString(readFirst(record, "requirement_ref", "requirement")),
       disposition:
         disposition === "intended" || disposition === "unintended" || disposition === "unresolved"
@@ -577,7 +630,9 @@ export function normalizeReport(input: unknown): EvidenceReport {
   validateReportShape(raw);
 
   const run = asRecord(raw.run) ?? {};
-  const runValue = (...keys: string[]): unknown => readFirst(run, ...keys) ?? readFirst(raw, ...keys);
+  const revisions = asRecord(raw.revisions) ?? {};
+  const runValue = (...keys: string[]): unknown =>
+    readFirst(run, ...keys) ?? readFirst(revisions, ...keys) ?? readFirst(raw, ...keys);
   return {
     schemaVersion: stringValue(readFirst(raw, "schema_version", "schemaVersion"), "unknown"),
     fixture: raw.fixture === true,
@@ -586,7 +641,8 @@ export function normalizeReport(input: unknown): EvidenceReport {
       baseSha: stringValue(runValue("base_sha", "baseSha", "base_commit", "base"), "Base not provided"),
       headSha: stringValue(runValue("head_sha", "headSha", "head_commit", "head"), "Head not provided"),
       generatedAt: stringValue(runValue("generated_at", "generatedAt", "created_at", "timestamp"), "Not provided"),
-      status: stringValue(runValue("status", "run_status"), "unknown"),
+      // An engine ReviewReport only exists once the run finished, so it carries no status field.
+      status: stringValue(runValue("status", "run_status"), raw.revisions ? "complete" : "unknown"),
     },
     changedSymbols: normalizeChangedSymbols(raw),
     impactPaths: normalizeImpactPaths(raw),

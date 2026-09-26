@@ -616,9 +616,12 @@ def _node_label(node: Any) -> str:
 
 def _path_label(path: Any) -> str:
     if isinstance(path, Mapping):
-        nodes = _first(path, "nodes", "symbols", "chain", "path", default=_MISSING)
+        nodes = _first(path, "hops", "nodes", "symbols", "chain", "path", default=_MISSING)
         if isinstance(nodes, (list, tuple)):
-            return " → ".join(_node_label(node) for node in nodes)
+            label = " → ".join(_node_label(node) for node in nodes)
+            flags = [text for key, text in (("outside_diff", "caller outside diff"), ("is_test", "test caller"))
+                     if path.get(key) is True]
+            return label + (f" [{', '.join(flags)}]" if flags else "")
         source = _first(path, "from", "source", "caller", "start", default=_MISSING)
         target = _first(path, "to", "target", "callee", "end", default=_MISSING)
         if source is not _MISSING or target is not _MISSING:
@@ -826,24 +829,46 @@ def _render_existing_tests(lines: List[str], data: Mapping[str, Any]) -> None:
         lines.append("- No existing-test results were supplied.")
     for entry in entries:
         if isinstance(entry, Mapping):
-            name = _first(entry, "name", "test", "id", default=_MISSING)
+            name = _first(entry, "name", "test", "id", "revision", default=_MISSING)
             result = _first(entry, "outcome", "status", "result", "passed", default=_MISSING)
             if name is _MISSING and result is _MISSING:
                 lines.append(f"- {_code_block(entry)}")
             else:
                 label = _inline(name) if name is not _MISSING else "Test"
                 value = _inline(result) if result is not _MISSING else "`result not provided`"
-                lines.append(f"- **{label}:** {value}")
+                counts = [f"{entry[key]} {key}" for key in ("passed", "failed", "errors")
+                          if isinstance(entry.get(key), int)]
+                lines.append(f"- **{label}:** {value}" + (f" ({', '.join(counts)})" if counts else ""))
         else:
             lines.append(f"- {_inline(entry)}")
     lines.append("")
 
 
 def _render_decisions(lines: List[str], data: Mapping[str, Any]) -> None:
-    lines.extend(["### Human decisions", ""])
-    decisions = _items(_first(data, "decisions", "dispositions", "decision", default=[]))
+    _render_decision_list(
+        lines,
+        "Human decisions",
+        _items(_first(data, "decisions", "dispositions", "decision", default=[])),
+        "No human disposition was recorded; this renderer does not decide intent.",
+    )
+    prior = _items(data.get("prior_decisions"))
+    if prior:
+        _render_decision_list(lines, "Prior decisions (ledger)", prior, "")
+
+
+def _render_needs_bob_action(lines: List[str], data: Mapping[str, Any]) -> None:
+    refs = _items(data.get("needs_bob_action"))
+    if not refs:
+        return
+    lines.extend(["### Impacted callers without a probe", ""])
+    lines.extend(f"- {_node_label(ref)}" for ref in refs)
+    lines.append("")
+
+
+def _render_decision_list(lines: List[str], heading: str, decisions: List[Any], empty: str) -> None:
+    lines.extend([f"### {heading}", ""])
     if not decisions:
-        lines.append("- No human disposition was recorded; this renderer does not decide intent.")
+        lines.append(f"- {empty}")
         lines.append("")
         return
 
@@ -858,6 +883,10 @@ def _render_decisions(lines: List[str], data: Mapping[str, Any]) -> None:
             lines.append(f"- **Disposition:** {_inline(disposition)}")
         else:
             lines.append("- **Disposition:** `not recorded`")
+
+        target = decision.get("target")
+        if isinstance(target, Mapping):
+            lines.append(f"- **Target:** {_node_label(target)}")
 
         for field_label, field_keys in (
             ("Decision ID", ("decision_id", "id")),
@@ -1012,6 +1041,8 @@ def _render_extra_fields(lines: List[str], data: Mapping[str, Any]) -> None:
         "decisions",
         "decision",
         "dispositions",
+        "prior_decisions",
+        "needs_bob_action",
         "tests",
         "test_results",
         "existing_tests",
@@ -1070,6 +1101,7 @@ def render_markdown(report: Any) -> str:
     _render_impact(lines, data)
     _render_existing_tests(lines, data)
     _render_observations(lines, data)
+    _render_needs_bob_action(lines, data)
     _render_decisions(lines, data)
     _render_limits(lines, data)
     _render_links(lines, data)

@@ -1,121 +1,366 @@
 {
   "schema_version": "0.1",
-  "fixture": true,
-  "run": {
-    "repo": "fixture/sample-project",
-    "base_sha": "fixture-base",
-    "head_sha": "fixture-head",
-    "generated_at": "2026-09-26T12:00:00Z",
-    "status": "complete"
+  "fixture": false,
+  "generated_at": "2026-09-26T10:51:55.085421Z",
+  "repo": "webdev-testa/pocbobbin",
+  "revisions": {
+    "base_ref": "ref/base",
+    "head_ref": "origin/scenario1-head",
+    "base_sha": "1cb1511c4eb3f3c1b955cb9b97c24033d8be15d0",
+    "head_sha": "13ffdbba777771c706ec46dfaa34ec9147fc451b",
+    "changed_files": [
+      "sample_project/pricing/discount.py"
+    ]
   },
-  "changed_symbols": [
-    {
-      "path": "pricing/discount.py",
-      "symbol": "apply_discount",
-      "line": 4,
-      "change_type": "body_changed",
-      "tags": ["body_changed"]
-    }
-  ],
   "impact": {
-    "paths": [
+    "changed_symbols": [
       {
-        "id": "fixture-path-1",
-        "nodes": [
-          {
-            "path": "pricing/discount.py",
-            "symbol": "apply_discount",
-            "line": 4,
-            "outside_diff": false,
-            "role": "changed symbol"
-          },
-          {
-            "path": "pricing/invoice.py",
-            "symbol": "price_total",
-            "line": 12,
-            "outside_diff": true,
-            "role": "caller outside diff"
-          }
+        "path": "sample_project/pricing/discount.py",
+        "symbol": "<module>",
+        "tags": [
+          "added"
+        ],
+        "base_line": null,
+        "head_line": 7
+      },
+      {
+        "path": "sample_project/pricing/discount.py",
+        "symbol": "apply_discount",
+        "tags": [
+          "body_changed"
+        ],
+        "base_line": 10,
+        "head_line": 12
+      }
+    ],
+    "edges": [
+      {
+        "caller": {
+          "path": "sample_project/pricing/invoice.py",
+          "symbol": "price_total"
+        },
+        "callee": {
+          "path": "sample_project/pricing/discount.py",
+          "symbol": "apply_discount"
+        },
+        "line": 25,
+        "revisions": [
+          "base",
+          "head"
+        ]
+      },
+      {
+        "caller": {
+          "path": "sample_project/tests/test_discount.py",
+          "symbol": "test_apply_discount_half_off"
+        },
+        "callee": {
+          "path": "sample_project/pricing/discount.py",
+          "symbol": "apply_discount"
+        },
+        "line": 23,
+        "revisions": [
+          "base",
+          "head"
+        ]
+      },
+      {
+        "caller": {
+          "path": "sample_project/tests/test_discount.py",
+          "symbol": "test_apply_discount_no_discount"
+        },
+        "callee": {
+          "path": "sample_project/pricing/discount.py",
+          "symbol": "apply_discount"
+        },
+        "line": 27,
+        "revisions": [
+          "base",
+          "head"
+        ]
+      },
+      {
+        "caller": {
+          "path": "sample_project/tests/test_discount.py",
+          "symbol": "test_apply_discount_rejects_out_of_range"
+        },
+        "callee": {
+          "path": "sample_project/pricing/discount.py",
+          "symbol": "apply_discount"
+        },
+        "line": 32,
+        "revisions": [
+          "base",
+          "head"
+        ]
+      },
+      {
+        "caller": {
+          "path": "sample_project/tests/test_discount.py",
+          "symbol": "test_apply_discount_ten_percent"
+        },
+        "callee": {
+          "path": "sample_project/pricing/discount.py",
+          "symbol": "apply_discount"
+        },
+        "line": 19,
+        "revisions": [
+          "base",
+          "head"
         ]
       }
     ],
-    "unknowns": [
+    "paths": [
       {
-        "from": "pricing.invoice.price_total",
-        "to": "external caller",
-        "path": "pricing/invoice.py",
-        "line": 12,
-        "reason": "Fixture edge: the bounded call graph stops at this boundary."
-      }
-    ]
-  },
-  "observations": [
-    {
-      "id": "fixture-observation-delta",
-      "name": "invoice total at rounding boundary",
-      "input": {
-        "items": [
-          {"unit_price": "50.00", "quantity": 2}
+        "hops": [
+          {
+            "path": "sample_project/pricing/invoice.py",
+            "symbol": "price_total",
+            "line": 25
+          },
+          {
+            "path": "sample_project/pricing/discount.py",
+            "symbol": "apply_discount",
+            "line": 12
+          }
         ],
-        "discount": "0.10"
+        "outside_diff": true,
+        "is_test": false
       },
-      "probe_hash": "fixture-probe-delta",
-      "base": {"output": "100.00"},
-      "head": {"output": "99.99"},
-      "outcome": "delta_observed",
-      "details": "Fixture-only comparison. Replace with paired engine output before making review claims."
+      {
+        "hops": [
+          {
+            "path": "sample_project/tests/test_discount.py",
+            "symbol": "test_apply_discount_half_off",
+            "line": 23
+          },
+          {
+            "path": "sample_project/pricing/discount.py",
+            "symbol": "apply_discount",
+            "line": 12
+          }
+        ],
+        "outside_diff": true,
+        "is_test": true
+      },
+      {
+        "hops": [
+          {
+            "path": "sample_project/tests/test_discount.py",
+            "symbol": "test_apply_discount_no_discount",
+            "line": 27
+          },
+          {
+            "path": "sample_project/pricing/discount.py",
+            "symbol": "apply_discount",
+            "line": 12
+          }
+        ],
+        "outside_diff": true,
+        "is_test": true
+      },
+      {
+        "hops": [
+          {
+            "path": "sample_project/tests/test_discount.py",
+            "symbol": "test_apply_discount_rejects_out_of_range",
+            "line": 32
+          },
+          {
+            "path": "sample_project/pricing/discount.py",
+            "symbol": "apply_discount",
+            "line": 12
+          }
+        ],
+        "outside_diff": true,
+        "is_test": true
+      },
+      {
+        "hops": [
+          {
+            "path": "sample_project/tests/test_discount.py",
+            "symbol": "test_apply_discount_ten_percent",
+            "line": 19
+          },
+          {
+            "path": "sample_project/pricing/discount.py",
+            "symbol": "apply_discount",
+            "line": 12
+          }
+        ],
+        "outside_diff": true,
+        "is_test": true
+      }
+    ],
+    "unknowns": [],
+    "max_hops": 2
+  },
+  "tests": [
+    {
+      "revision": "base",
+      "sha": "1cb1511c4eb3f3c1b955cb9b97c24033d8be15d0",
+      "status": "ok",
+      "passed": 6,
+      "failed": 0,
+      "errors": 0,
+      "suite_hash": "cf76879b16e92a06"
     },
     {
-      "id": "fixture-observation-same",
-      "name": "ordinary discount case",
-      "input": {
-        "subtotal": "50.00",
-        "rate": "0.10"
-      },
-      "probe_hash": "fixture-probe-same",
-      "base": {"output": "45.00"},
-      "head": {"output": "45.00"},
-      "outcome": "same_on_tested_cases",
-      "details": "Fixture-only comparison; matching output is limited to this tested input."
-    },
-    {
-      "id": "fixture-observation-inconclusive",
-      "name": "head import check",
-      "input": {
-        "subtotal": "10.00"
-      },
-      "probe_hash": "fixture-probe-inconclusive",
-      "base": {"output": "10.00"},
-      "head": {"exception": "ImportError: optional dependency unavailable"},
-      "outcome": "inconclusive",
-      "setup_status": "import_error",
-      "details": "Fixture-only setup failure. A comparable result was not established."
+      "revision": "head",
+      "sha": "13ffdbba777771c706ec46dfaa34ec9147fc451b",
+      "status": "ok",
+      "passed": 6,
+      "failed": 0,
+      "errors": 0,
+      "suite_hash": "cf76879b16e92a06"
     }
   ],
-  "tests": {
-    "status": "passed",
-    "label": "Frozen test suite",
-    "details": "Fixture metadata only; this is not execution evidence."
-  },
-  "decisions": [
+  "comparisons": [
     {
-      "id": "fixture-decision-delta",
-      "observation_id": "fixture-observation-delta",
-      "probe_hash": "fixture-probe-delta",
-      "disposition": "unresolved",
-      "status": "fixture_context",
-      "rationale": "Fixture context only: the observed difference still needs a human disposition in a real run."
+      "probe": {
+        "id": "apply_discount_contract",
+        "target": {
+          "path": "sample_project/pricing/discount.py",
+          "symbol": "apply_discount"
+        },
+        "input": {
+          "args": [
+            105.26,
+            5.0
+          ]
+        },
+        "hash": "sha256:954edd7451e49763",
+        "authored_by": "human"
+      },
+      "base": {
+        "revision": "base",
+        "sha": "1cb1511c4eb3f3c1b955cb9b97c24033d8be15d0",
+        "status": "ok",
+        "output": 100.0,
+        "exception": null,
+        "duration_ms": 45
+      },
+      "head": {
+        "revision": "head",
+        "sha": "13ffdbba777771c706ec46dfaa34ec9147fc451b",
+        "status": "ok",
+        "output": 99.99,
+        "exception": null,
+        "duration_ms": 46
+      },
+      "outcome": "delta_observed",
+      "ran_at": "2026-09-26T10:51:54.814223Z",
+      "reruns": null
+    },
+    {
+      "probe": {
+        "id": "apply_discount_policy_cap",
+        "target": {
+          "path": "sample_project/pricing/discount.py",
+          "symbol": "apply_discount"
+        },
+        "input": {
+          "args": [
+            100.0,
+            40.0
+          ]
+        },
+        "hash": "sha256:1a4c3ef89d3f5cdb",
+        "authored_by": "human"
+      },
+      "base": {
+        "revision": "base",
+        "sha": "1cb1511c4eb3f3c1b955cb9b97c24033d8be15d0",
+        "status": "ok",
+        "output": 60.0,
+        "exception": null,
+        "duration_ms": 46
+      },
+      "head": {
+        "revision": "head",
+        "sha": "13ffdbba777771c706ec46dfaa34ec9147fc451b",
+        "status": "ok",
+        "output": 60.0,
+        "exception": null,
+        "duration_ms": 47
+      },
+      "outcome": "same_on_tested_cases",
+      "ran_at": "2026-09-26T10:51:54.909253Z",
+      "reruns": null
+    },
+    {
+      "probe": {
+        "id": "price_total_boundary",
+        "target": {
+          "path": "sample_project/pricing/invoice.py",
+          "symbol": "price_total"
+        },
+        "input": {
+          "args": [
+            [
+              {
+                "description": "widget",
+                "unit_price": 39.46,
+                "qty": 2
+              },
+              {
+                "description": "gizmo",
+                "unit_price": 8.78,
+                "qty": 3
+              }
+            ],
+            5.0
+          ]
+        },
+        "hash": "sha256:c61213d5b7c994d4",
+        "authored_by": "human"
+      },
+      "base": {
+        "revision": "base",
+        "sha": "1cb1511c4eb3f3c1b955cb9b97c24033d8be15d0",
+        "status": "ok",
+        "output": 100.0,
+        "exception": null,
+        "duration_ms": 49
+      },
+      "head": {
+        "revision": "head",
+        "sha": "13ffdbba777771c706ec46dfaa34ec9147fc451b",
+        "status": "ok",
+        "output": 99.99,
+        "exception": null,
+        "duration_ms": 50
+      },
+      "outcome": "delta_observed",
+      "ran_at": "2026-09-26T10:51:55.010168Z",
+      "reruns": null
+    }
+  ],
+  "needs_bob_action": [],
+  "decisions": [],
+  "prior_decisions": [
+    {
+      "id": "951cc25e49ee",
+      "repo": "webdev-testa/pocbobbin",
+      "target": {
+        "path": "sample_project/pricing/discount.py",
+        "symbol": "apply_discount"
+      },
+      "base_sha": "1cb1511c4eb3f3c1b955cb9b97c24033d8be15d0",
+      "head_sha": "91993531872945007438c1b9f026717d9da6910f",
+      "probe_hash": "sha256:1a4c3ef89d3f5cdb",
+      "before": 60.0,
+      "after": "ValueError: discount_pct out of range",
+      "intent": "intended",
+      "rationale": "Business policy update: maximum allowable discount capped at 30% per Q3 pricing review.",
+      "requirement_ref": "PRICE-2026-Q3",
+      "status": "approved",
+      "supersedes": null
     }
   ],
   "limits": [
-    "This is fixture data for UI integration, not a real repository run.",
-    "Impact analysis is bounded; the unknown edge is not proof of safety.",
-    "Tested inputs are examples, not proof over every possible input.",
-    "Setup failures, import errors, and timeouts are inconclusive.",
-    "A human disposition does not override failed or inconclusive execution."
-  ],
-  "links": {
-    "action_run": "",
-    "artifact": ""
-  }
+    "Callers traced up to 2 hops; deeper callers are not shown.",
+    "Impact is static (AST): calls through variables, dynamic dispatch or class hierarchies may be missed. Unresolved references that could reach a changed symbol are listed as unknowns, not as safe.",
+    "'same_on_tested_cases' means identical output for these frozen inputs only; it is not proof of equivalence."
+  ]
 }
