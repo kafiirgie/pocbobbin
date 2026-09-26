@@ -9,7 +9,7 @@ const TIER_LABELS: Record<LanguageSupport["tier"], string> = {
   experimental: "experimental",
 };
 
-export function TierBadge({ support }: { support: LanguageSupport }) {
+export function TierBadge({ support }: { support: Pick<LanguageSupport, "language" | "tier"> }) {
   return (
     <Badge variant="outline" className={TONE_CLASSES[support.tier === "full" ? "success" : "warning"]}>
       {support.language} · {TIER_LABELS[support.tier]}

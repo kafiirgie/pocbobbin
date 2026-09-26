@@ -1,9 +1,14 @@
 import ELK from "elkjs/lib/elk.bundled.js";
 import type { ElkExtendedEdge, ElkNode } from "elkjs/lib/elk-api";
+import type { Edge, Node } from "@xyflow/react";
 
 // Folder → (file →) leaf layout with ELK, shared by the evidence map (leaves are functions inside
 // file boxes) and the repo map (leaves are the files themselves). Dagre is not used because it
 // mis-lays sub-flows whose nodes connect outside their group, which is the cross-folder story here.
+
+/** An edge whose text (call site, import line) is shown in a tooltip; `unknown` draws it dashed. */
+export type TooltipFlowEdge = Edge<{ tooltip: string; unknown?: boolean }, "call">;
+export type FolderFlowNode = Node<{ label: string; path: string }, "folder">;
 
 export interface LayoutLeaf {
   id: string;

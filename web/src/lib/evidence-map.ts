@@ -1,13 +1,11 @@
-import { MarkerType, type Edge, type Node } from "@xyflow/react";
+import { MarkerType, type Node } from "@xyflow/react";
 import { evidenceNodes, languageOf, type EvidenceNode } from "@/lib/evidence";
-import { layoutNested, type LayoutLeaf, type PortPlacement } from "@/lib/nested-layout";
+import { layoutNested, type LayoutLeaf, type PortPlacement, type TooltipFlowEdge } from "@/lib/nested-layout";
 import { symbolKey, type LanguageSupport, type ReviewReport, type SymbolRef } from "@/lib/review-report";
 
 // Leaf box, in React Flow's canvas units (not CSS pixels on the page).
 export const NODE_WIDTH = 240;
 export const NODE_HEIGHT = 96;
-/** SVG dash pattern that marks an unknown (unresolved) edge; the legend uses the same value. */
-export const UNKNOWN_EDGE_DASH = "6 4";
 
 // A type alias (not an interface) so node data satisfies React Flow's Record<string, unknown>.
 type Ports = { ports: PortPlacement[] };
@@ -15,7 +13,7 @@ export type EvidenceFlowNode = Node<{ node: EvidenceNode } & Ports, "evidence">;
 export type TestsFlowNode = Node<{ targetKey: string; target: SymbolRef; tests: EvidenceNode[] } & Ports, "tests">;
 export type GroupFlowNode = Node<{ label: string; path: string; support?: LanguageSupport }, "folder" | "file">;
 export type MapNode = EvidenceFlowNode | TestsFlowNode | GroupFlowNode;
-export type CallFlowEdge = Edge<{ tooltip: string; unknown: boolean }, "call">;
+export type CallFlowEdge = TooltipFlowEdge;
 
 export interface EvidenceMapData {
   nodes: MapNode[];

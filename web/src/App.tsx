@@ -1,5 +1,4 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { FileQuestion } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
 import { BehaviorDifferences } from "@/components/BehaviorDifferences";
 import { DecisionPanel } from "@/components/DecisionPanel";
@@ -8,7 +7,6 @@ import { NeedsAttention } from "@/components/NeedsAttention";
 import { NodeDetailsSheet } from "@/components/NodeDetailsSheet";
 import { ErrorState, LoadingState } from "@/components/ReportStates";
 import { SummaryHeader } from "@/components/SummaryHeader";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { evidenceNodes } from "@/lib/evidence";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -38,6 +36,7 @@ function useReport(reloadToken: number): LoadState {
 }
 
 const EvidenceMap = lazy(() => import("@/components/EvidenceMap"));
+const RepoMapTab = lazy(() => import("@/components/RepoMapTab"));
 
 function PrReview({ report }: { report: ReviewReport }) {
   const nodes = useMemo(() => evidenceNodes(report), [report]);
@@ -61,24 +60,15 @@ function PrReview({ report }: { report: ReviewReport }) {
   );
 }
 
-function RepoMapTab() {
-  return (
-    <Empty className="border">
-      <EmptyHeader>
-        <EmptyMedia variant="icon"><FileQuestion aria-hidden="true" /></EmptyMedia>
-        <EmptyTitle>No repo map yet</EmptyTitle>
-        <EmptyDescription>
-          Generate one with <code>behavior-review map --out web/public/data/repo_map.json</code>, then reload.
-        </EmptyDescription>
-      </EmptyHeader>
-    </Empty>
-  );
-}
-
 export default function App() {
   const { theme, toggle } = useTheme();
   const [reloadToken, setReloadToken] = useState(0);
   const state = useReport(reloadToken);
+  const [tab, setTab] = useState("pr");
+  const showEvidence = useCallback(() => {
+    setTab("pr");
+    requestAnimationFrame(() => document.getElementById("map-heading")?.scrollIntoView({ block: "start" }));
+  }, []);
 
   return (
     <TooltipProvider>
@@ -87,13 +77,17 @@ export default function App() {
         {state.status === "loading" ? <LoadingState /> : null}
         {state.status === "error" ? <ErrorState message={state.message} onRetry={() => setReloadToken((t) => t + 1)} /> : null}
         {state.status === "ready" ? (
-          <Tabs defaultValue="pr" className="gap-6">
+          <Tabs value={tab} onValueChange={setTab} className="gap-6">
             <TabsList aria-label="Views">
               <TabsTrigger value="pr">PR review</TabsTrigger>
               <TabsTrigger value="repo">Repo map</TabsTrigger>
             </TabsList>
             <TabsContent value="pr"><PrReview report={state.report} /></TabsContent>
-            <TabsContent value="repo"><RepoMapTab /></TabsContent>
+            <TabsContent value="repo">
+              <Suspense fallback={<Skeleton className="h-128 w-full" />}>
+                <RepoMapTab changedFiles={state.report.revisions.changed_files} onShowEvidence={showEvidence} />
+              </Suspense>
+            </TabsContent>
           </Tabs>
         ) : null}
       </main>
