@@ -146,3 +146,17 @@ def test_ambiguous_module_name_is_unknown_not_safe(impact_of):
     impact = impact_of(base, {"a/util.py": "def helper():\n    return 2\n"})
     assert impact.paths == []
     assert [(u.path, u.reason) for u in impact.unknowns] == [("c/user.py", "unresolved reference")]
+
+def test_local_variable_named_like_a_changed_function_is_not_a_reference(impact_of):
+    user = (
+        "from pricing.discount import apply_discount\n\n\n"
+        "def summary(prices):\n"
+        "    apply_discount = [p * 0.9 for p in prices]\n"
+        "    return apply_discount\n\n\n"
+        "def uses_it(prices):\n"
+        "    return apply_discount(prices, 0.1)\n"
+    )
+    impact = impact_of({**SAMPLE, "sample_project/pricing/summary.py": user}, {DISCOUNT: DISCOUNT_V2})
+    callers = {p.hops[0].symbol for p in impact.paths}
+    assert "uses_it" in callers and "summary" not in callers
+    assert impact.unknowns == []

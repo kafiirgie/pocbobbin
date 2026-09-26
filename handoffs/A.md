@@ -1,47 +1,39 @@
 # Handoff — Lane A (Analysis)
 
-**Branch / SHA:** not committed yet (repo had no commits at start).
+**Status:** done and on `main` (PRs #1, #4, #5 and the lane A review follow-up).
 
 ## Works
-- `app/schemas.py` — all shared models (`ReviewReport` is the single object every door consumes).
-  `RevisionPair` is runtime-only: `repo` slug, local `root`/`base_path`/`head_path`, plus
-  `revisions` (refs, SHAs, changed files) — only `repo` and `revisions` go into a report.
-  `Comparison` embeds its `Probe`; `Decision` uses `target: SymbolRef`.
-- `app/snapshot.py` — `open_pair(repo, base, head)` context manager: detached `git worktree`s in a temp
-  dir, removed afterwards. Working tree, index and current branch untouched (tested).
+- `app/schemas.py` — all shared models; `ReviewReport` is the one object every door consumes.
+  `RevisionPair` is runtime-only (local checkout paths); only `repo` and `revisions` go into a report.
+- `app/snapshot.py` — `open_pair(repo, base, head)`: detached `git worktree`s in a temp dir, removed
+  afterwards. Working tree, index and current branch untouched.
 - `app/impact.py` — `analyze(pair, max_hops=2)`:
-  - Symbols: functions, methods (`Class.method`), module/class-level assigned names, and `<module>`
-    (remaining top-level code + imports). Tags: added / removed / signature_changed / body_changed /
-    decorators_changed / imports_changed. Docstring-only edits are not changes.
-  - Edges: every load of a resolvable symbol (calls, callback references, `X = helper()`), absolute +
-    relative imports, `import pkg.mod` chains, `self.method`, star imports, package re-exports.
-    Modules are named from their package root (`sample_project/pricing/discount.py` → `pricing.discount`);
-    a name claimed by two files is ambiguous and never guessed.
-  - Paths: reverse callers up to `max_hops`, union of base+head edges; `outside_diff`, `is_test` flags;
-    non-test callers outside the diff sort first.
-  - Unknowns: any unresolved reference or `getattr(x, "name")` whose name matches a changed symbol;
+  - Symbols: functions, methods (`Class.method`), module/class-level assigned names, `<module>`
+    (other top-level code + imports). Docstring-only edits are not changes.
+  - Edges: every load of a resolvable symbol (calls, callbacks, `X = helper()`), absolute and relative
+    imports, `import pkg.mod` chains, `self.method`, star imports, package re-exports. Modules are
+    named from their package root; a name claimed by two files is ambiguous and never guessed.
+    A function's own parameters and assigned names are local and never count as references.
+  - Paths: reverse callers up to `max_hops`, union of base+head edges, `outside_diff` / `is_test`.
+  - Unknowns: unresolved references or `getattr(x, "name")` whose name matches a changed symbol;
     unparseable files.
-- `app/cli.py` — the single engine entry: `pipeline(repo, base, head, max_hops, run=False)`.
-  With `run` (CLI `--run`) it also calls B's `runner.compare(pair, impact=impact)` inside the same
-  `open_pair` block and fills `tests`, `comparisons`, `needs_bob_action` and honest limits.
-  Always fills `prior_decisions` via D's `decisions.lookup` on the ledger at the base revision:
-  records whose path + symbol match a changed symbol or any hop on an impact path; superseded
-  records are kept but relabeled `superseded`.
-- `contracts/report_scenario1.json` — generated from a real `--run` of `origin/base` vs
-  `origin/scenario1-head`, then labeled `"fixture": true` with one example `unintended` decision.
-  Validated by `tests/test_contracts.py`.
+- `app/cli.py` — `pipeline(repo, base, head, max_hops, run=False)`: impact, then prior decisions via
+  D's `decisions.lookup` (matched on path + symbol, superseded ones relabeled), then with `run` B's
+  `runner.compare(pair, impact=impact)`. CLI: `--base --head --max-hops --run --json --markdown`
+  (`--markdown` uses C's `report.render_markdown`).
+- `contracts/report_scenario1.json` — generated from a real `--run` of scenario 1, labeled fixture.
 
 ## Checks run
-`pytest -q` → 38 passed, 1 failed on Windows only (B's `test_needs_bob_action_when_a_caller_has_no_probe`
-creates a branch named `head`, which collides with `HEAD` on a case-insensitive filesystem; passes on Linux).
-`behavior-review --base origin/base --head origin/scenario<N>-head --run` on Windows:
-scenario 1 suite 6/6 green both sides, both probes `delta_observed` 100.0 → 99.99, caller
-`price_total → apply_discount` (invoice.py:25) outside the diff; scenario 3 `same_on_tested_cases`;
-scenario 4 `inconclusive`.
+`pytest -q` → 53 passed, 1 failed (B's `test_compare_survives_a_base_without_the_harness` fetches a
+local `scenario1-head` branch that only exists on B's machine; also fails on `main`).
+`behavior-review --base ref/base --head origin/scenario1-head --run` → tests 6/6 green on both sides,
+`price_total` (invoice.py:25) outside the diff, `delta_observed` 100.0 → 99.99, cites decision
+`951cc25e49ee`. On lane C's merge range, unknowns dropped from 35 to 7 after the local-name fix,
+with identical paths and callers.
 
 ## Next
-- `--format markdown` once C's `report.render` exists, so the Action posts C's rendering instead of its inline JS.
-- Sync 2: merge and tag a demo-ready commit.
+- Sync 2: tag a demo-ready commit once C's viewer shows a real report.
+- After 14:00: check every technical claim in the video and statements against real runs.
 
 ## Blockers
-- No push access to `webdev-testa/pocbobbin` yet; PRs go through the `kafiirgie` fork.
+None.

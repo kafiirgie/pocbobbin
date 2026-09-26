@@ -12,6 +12,7 @@ from pathlib import Path
 
 from app.decisions import lookup
 from app.impact import analyze
+from app.report import render_markdown
 from app.runner import compare
 from app.schemas import Decision, DecisionStatus, ImpactResult, ReviewReport, RevisionPair, SymbolRef
 from app.snapshot import SnapshotError, open_pair
@@ -134,6 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--head", default="HEAD", help="Head revision (default: HEAD)")
     parser.add_argument("--max-hops", type=int, default=2, help="Caller levels to trace back (default: 2)")
     parser.add_argument("--json", type=Path, help="Write the ReviewReport JSON here instead of stdout")
+    parser.add_argument("--markdown", type=Path, help="Also write the report as Markdown (the PR comment body) here")
     parser.add_argument(
         "--run",
         action="store_true",
@@ -160,9 +162,9 @@ def main(argv: list[str] | None = None) -> int:
     payload = report.model_dump_json(indent=2)
     if args.json:
         args.json.write_text(payload + "\n", encoding="utf-8")
-        print(_summary(report))
-    else:
-        print(payload)
+    if args.markdown:
+        args.markdown.write_text(render_markdown(report), encoding="utf-8")
+    print(_summary(report) if args.json or args.markdown else payload)
     return 0
 
 
