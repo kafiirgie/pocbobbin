@@ -1,14 +1,15 @@
-"""Repository-level behavior-review configuration.
+"""Repository-level behavior-review configuration and adapter detection.
 
-The defaults deliberately reproduce the current Python/pytest workflow. A
-repository does not need a ``behavior.json`` file until it opts into another
-language or a different test/probe toolchain.
+Explicit ``behavior.json`` remains authoritative. When it is absent, the
+detector selects one or more adapters from repository manifests and source
+extensions, while preserving the Python defaults for legacy/empty repositories.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+import os
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -188,10 +189,99 @@ SUPPORTED_TEST_REPORTS = {
     "shell-text",
 }
 
+LANGUAGE_ALIASES = {
+    "py": "python", "ts": "typescript", "tsx": "typescript", "js": "javascript", "jsx": "javascript",
+    "cs": "csharp", "c#": "csharp", "c-sharp": "csharp", "c++": "cpp", "cxx": "cpp",
+    "kt": "kotlin", "rb": "ruby", "sh": "bash", "shell": "bash",
+}
+
+DETECTION_SKIP_DIRS = {
+    ".git", ".hg", ".svn", ".next", ".pytest_cache", ".mypy_cache", ".turbo", ".cache",
+    "__pycache__", "node_modules", "venv", ".venv", "build", "dist", "site-packages",
+    "target", "vendor", "coverage", "out", "bin", "obj", "Pods", "DerivedData",
+}
+
+DETECTION_MARKERS: dict[str, tuple[tuple[str, int], ...]] = {
+    "python": (("pyproject.toml", 8), ("requirements.txt", 6), ("setup.py", 6), ("setup.cfg", 5), ("Pipfile", 5), ("tox.ini", 4)),
+    "typescript": (("tsconfig*.json", 12),),
+    "javascript": (("package.json", 6),),
+    "java": (("pom.xml", 10), ("build.gradle", 7), ("settings.gradle", 5)),
+    "kotlin": (("build.gradle.kts", 10), ("settings.gradle.kts", 8)),
+    "go": (("go.mod", 12),),
+    "cpp": (("CMakeLists.txt", 6),),
+    "c": (("CMakeLists.txt", 5),),
+    "rust": (("Cargo.toml", 12),),
+    "php": (("composer.json", 8), ("phpunit.xml*", 7)),
+    "ruby": (("Gemfile", 8), (".rspec", 5)),
+    "swift": (("Package.swift", 12),),
+    "dart": (("pubspec.yaml", 12),),
+}
+
+LANGUAGE_PRIORITY = {
+    "typescript": 0, "javascript": 1, "python": 2, "go": 3, "rust": 4,
+    "java": 5, "kotlin": 6, "csharp": 7, "cpp": 8, "c": 9, "php": 10,
+    "ruby": 11, "swift": 12, "dart": 13, "bash": 14,
+}
+
+
+def _normalize_language(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError("behavior.json language values must be non-empty strings")
+    language = LANGUAGE_ALIASES.get(value.strip().lower(), value.strip().lower())
+    if language not in SUPPORTED_LANGUAGES:
+        raise ConfigError(f"unsupported behavior-review language '{language}'")
+    return language
+
+
+def _repository_source_counts(root: Path) -> dict[str, int]:
+    extensions = {
+        extension.lower()
+        for defaults in LANGUAGE_DEFAULTS.values()
+        for extension in defaults["extensions"]
+    }
+    counts = {extension: 0 for extension in extensions}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if name not in DETECTION_SKIP_DIRS]
+        for filename in filenames:
+            extension = Path(filename).suffix.lower()
+            if extension in counts:
+                counts[extension] += 1
+    return counts
+
+
+def _marker_score(root: Path, patterns: tuple[tuple[str, int], ...]) -> int:
+    return sum(weight for pattern, weight in patterns if any(root.glob(pattern)))
+
+
+def _detect_languages(root: Path) -> tuple[str, ...]:
+    counts = _repository_source_counts(root)
+    scores: dict[str, int] = {}
+    for language, defaults in LANGUAGE_DEFAULTS.items():
+        source_count = sum(counts.get(extension.lower(), 0) for extension in defaults["extensions"])
+        marker_score = _marker_score(root, DETECTION_MARKERS.get(language, ()))
+        if source_count or marker_score:
+            scores[language] = min(source_count, 20) + marker_score
+
+    # A TypeScript repository often has JavaScript config files. Do not add a
+    # second adapter just because package.json exists and the JS count is small.
+    if "typescript" in scores and scores.get("javascript", 0) <= 6:
+        scores.pop("javascript", None)
+
+    return tuple(sorted(scores, key=lambda language: (-scores[language], LANGUAGE_PRIORITY[language], language)))
+
+
+def _auto_detect_config(root: Path) -> "BehaviorConfig":
+    languages = _detect_languages(root)
+    if not languages:
+        # Preserve the established behavior for empty/legacy Python repositories.
+        return BehaviorConfig()
+    return BehaviorConfig.from_mapping({"languages": list(languages)})
+
 
 @dataclass(frozen=True)
 class BehaviorConfig:
     language: str = "python"
+    languages: tuple[str, ...] = ("python",)
     extensions: tuple[str, ...] = (".py",)
     changed_file_filter: tuple[str, ...] = ()
     tests_dir: str = "sample_project/tests"
@@ -202,6 +292,20 @@ class BehaviorConfig:
     max_hops: int = 2
     append_tests: bool = True
     extra: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if not self.languages:
+            object.__setattr__(self, "languages", (self.language,))
+
+    def for_language(self, language: str) -> "BehaviorConfig":
+        """Return the impact settings for one adapter in a mixed repository."""
+        language = _normalize_language(language)
+        defaults = LANGUAGE_DEFAULTS[language]
+        extensions = self.extensions
+        if len(self.languages) > 1:
+            configured = tuple(extension for extension in extensions if extension in defaults["extensions"])
+            extensions = configured or tuple(defaults["extensions"])
+        return replace(self, language=language, languages=(language,), extensions=extensions)
 
     @classmethod
     def from_mapping(cls, value: dict[str, Any]) -> "BehaviorConfig":
@@ -214,23 +318,30 @@ class BehaviorConfig:
                 raise ConfigError(f"behavior.json field '{name}' must be a non-empty string array")
             return tuple(item.strip() for item in raw)
 
-        language = value.get("language", cls.language)
-        if not isinstance(language, str) or not language.strip():
-            raise ConfigError("behavior.json field 'language' must be a non-empty string")
-        language = language.strip().lower()
-        aliases = {"ts": "typescript", "tsx": "typescript", "js": "javascript", "jsx": "javascript"}
-        aliases.update({
-            "cs": "csharp", "c#": "csharp", "c-sharp": "csharp", "c++": "cpp",
-            "cxx": "cpp", "kt": "kotlin", "rb": "ruby", "sh": "bash", "shell": "bash",
-        })
-        language = aliases.get(language, language)
-        if language not in SUPPORTED_LANGUAGES:
-            raise ConfigError(f"unsupported behavior-review language '{language}'")
+        if "languages" in value:
+            raw_languages = value["languages"]
+            if not isinstance(raw_languages, (list, tuple)) or not raw_languages:
+                raise ConfigError("behavior.json field 'languages' must be a non-empty string array")
+            languages = tuple(_normalize_language(item) for item in raw_languages)
+            if "language" in value:
+                primary = _normalize_language(value["language"])
+                if primary not in languages:
+                    raise ConfigError("behavior.json field 'language' must be included in 'languages'")
+                languages = (primary, *(item for item in languages if item != primary))
+        else:
+            languages = (_normalize_language(value.get("language", cls.language)),)
+        languages = tuple(dict.fromkeys(languages))
+        language = languages[0]
 
         defaults = LANGUAGE_DEFAULTS[language]
+        default_extensions = tuple(dict.fromkeys(
+            extension
+            for selected in languages
+            for extension in LANGUAGE_DEFAULTS[selected]["extensions"]
+        ))
         extensions = tuple(
             extension if extension.startswith(".") else f".{extension}"
-            for extension in strings("extensions", defaults["extensions"])
+            for extension in strings("extensions", default_extensions)
         )
         if not extensions:
             raise ConfigError("behavior.json field 'extensions' must not be empty")
@@ -243,7 +354,7 @@ class BehaviorConfig:
             raise ConfigError("behavior.json field 'max_hops' must be a positive integer")
 
         known = {
-            "language", "extensions", "changed_file_filter", "tests_dir", "test_command",
+            "language", "languages", "extensions", "changed_file_filter", "tests_dir", "test_command",
             "test_report", "probe_runner", "test_file_patterns", "max_hops", "append_tests",
         }
         test_command = strings("test_command", defaults["test_command"])
@@ -260,6 +371,7 @@ class BehaviorConfig:
             raise ConfigError("behavior.json field 'append_tests' must be a boolean")
         return cls(
             language=language,
+            languages=languages,
             extensions=extensions,
             changed_file_filter=strings("changed_file_filter", cls.changed_file_filter),
             tests_dir=tests_dir.strip().replace("\\", "/"),
@@ -274,16 +386,17 @@ class BehaviorConfig:
 
 
 def load_config(repo: str | Path, filename: str = "behavior.json") -> BehaviorConfig:
-    """Load optional configuration from a repository root.
+    """Load explicit configuration or detect adapters from a repository root.
 
-    Missing configuration is intentionally equivalent to the current Python
-    defaults. Malformed configuration fails before analysis rather than
-    silently selecting a different execution toolchain.
+    Explicit behavior.json remains authoritative. When it is absent, known
+    manifests and source extensions select one or more adapters. A repository
+    with no detectable language keeps the legacy Python defaults; a detected
+    non-Python repository never silently falls back to Python.
     """
 
     path = Path(repo) / filename
     if not path.exists():
-        return BehaviorConfig()
+        return _auto_detect_config(Path(repo))
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except OSError as exc:

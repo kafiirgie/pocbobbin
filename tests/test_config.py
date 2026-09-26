@@ -13,6 +13,53 @@ def test_missing_config_keeps_python_defaults(tmp_path: Path):
     assert config.test_command == ("python", "-m", "pytest", "-q", "--no-header")
 
 
+def test_missing_config_auto_detects_typescript_defaults(tmp_path: Path):
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "tsconfig.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/app.ts").write_text("export const app = 1;", encoding="utf-8")
+
+    config = load_config(tmp_path)
+
+    assert config.language == "typescript"
+    assert config.languages == ("typescript",)
+    assert config.extensions == (".ts", ".tsx")
+    assert config.test_report == "vitest-json"
+
+
+def test_missing_config_detects_multiple_languages(tmp_path: Path):
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "tsconfig.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "frontend.ts").write_text("export const frontend = 1;", encoding="utf-8")
+    (tmp_path / "worker.py").write_text("def worker(): return 1", encoding="utf-8")
+
+    config = load_config(tmp_path)
+
+    assert config.language == "typescript"
+    assert config.languages == ("typescript", "python")
+    assert set(config.extensions) == {".ts", ".tsx", ".py"}
+
+
+def test_explicit_config_wins_over_auto_detection(tmp_path: Path):
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "tsconfig.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "app.ts").write_text("export const app = 1;", encoding="utf-8")
+    (tmp_path / "behavior.json").write_text('{"language":"python"}', encoding="utf-8")
+
+    config = load_config(tmp_path)
+
+    assert config.language == "python"
+    assert config.languages == ("python",)
+
+
+def test_explicit_config_can_select_multiple_languages(tmp_path: Path):
+    config = BehaviorConfig.from_mapping({"languages": ["typescript", "py"]})
+
+    assert config.language == "typescript"
+    assert config.languages == ("typescript", "python")
+    assert set(config.extensions) == {".ts", ".tsx", ".py"}
+
+
 def test_every_configured_language_has_an_explicit_adapter():
     expected = {
         "python", "typescript", "javascript", "java", "csharp", "go", "cpp", "c", "rust", "php",
