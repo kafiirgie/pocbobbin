@@ -5,8 +5,8 @@ import { DecisionPanel } from "@/components/DecisionPanel";
 import { LimitsCard, TestsCard } from "@/components/TestsAndLimits";
 import { NeedsAttention } from "@/components/NeedsAttention";
 import { NodeDetailsSheet } from "@/components/NodeDetailsSheet";
-import { OpenReportButton } from "@/components/OpenReportButton";
-import { ErrorState, LoadingState, OpenedNotice, OpenError } from "@/components/ReportStates";
+import { OpenReportDialog } from "@/components/OpenReportDialog";
+import { ErrorState, LoadingState, OpenedNotice } from "@/components/ReportStates";
 import { SummaryHeader } from "@/components/SummaryHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { evidenceNodes } from "@/lib/evidence";
@@ -97,19 +97,13 @@ function ShippedReport() {
 export default function App() {
   const { theme, toggle } = useTheme();
   const [opened, setOpened] = useState<OpenedReport | null>(null);
-  const [openError, setOpenError] = useState<string>();
-  const open = useCallback((next: OpenedReport) => {
-    setOpened(next);
-    setOpenError(undefined);
-  }, []);
 
   return (
     <TooltipProvider>
       <AppHeader theme={theme} onToggleTheme={toggle}>
-        <OpenReportButton onOpen={open} onError={setOpenError} />
+        <OpenReportDialog onOpen={setOpened} />
       </AppHeader>
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
-        {openError ? <OpenError message={openError} onDismiss={() => setOpenError(undefined)} /> : null}
         {opened ? <OpenedNotice names={opened.names} onClose={() => setOpened(null)} /> : null}
         {opened ? (
           <ReportViews key={`${opened.names.join()}:${opened.report.generated_at}`} report={opened.report} map={opened.map} />

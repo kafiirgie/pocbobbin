@@ -30,19 +30,6 @@ export function OpenedNotice({ names, onClose }: { names: string[]; onClose: () 
   );
 }
 
-export function OpenError({ message, onDismiss }: { message: string; onDismiss: () => void }) {
-  return (
-    <Alert variant="destructive">
-      <CircleAlert aria-hidden="true" />
-      <AlertTitle>Those files could not be opened</AlertTitle>
-      <AlertDescription className="space-y-3">
-        <p>{message} The page still shows the previous report.</p>
-        <Button variant="outline" size="sm" onClick={onDismiss}>Dismiss</Button>
-      </AlertDescription>
-    </Alert>
-  );
-}
-
 export function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <Alert variant="destructive">
