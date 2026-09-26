@@ -98,3 +98,14 @@ def test_cli_records_links_in_json_and_markdown(make_repo, tmp_path):
     assert url in md.read_text(encoding="utf-8")
     with pytest.raises(SystemExit):
         main([*args, "--link", "not-a-link"])
+
+def test_report_names_its_analysis_and_ignores_config_changed_by_the_change(make_repo):
+    repo = make_repo(FILES, {**CHANGE, "behavior.json": '{"language": "python", "max_hops": 1}'})
+
+    report = pipeline(repo, "base", "head")
+
+    python = {"language": "python", "adapter": "python-ast", "tier": "full"}
+    assert report.analysis.model_dump() == {**python, "config_source": "detected", "languages": [python]}
+    assert report.impact.max_hops == 2  # the head's behavior.json did not take effect
+    assert any("behavior.json differs in this change" in limit for limit in report.limits)
+    assert not any("is supported at tier" in limit for limit in report.limits)

@@ -10,20 +10,44 @@ import json
 import sys
 from pathlib import Path
 
-from app.config import ConfigError, load_config
+from app.adapters.registry import TIER_LIMITS, get_adapter
+from app.config import BehaviorConfig, ConfigError, load_revision_config
 from app.decisions import lookup
 from app.impact import analyze
 from app.report import render_markdown
 from app.runner import compare
-from app.schemas import Decision, DecisionStatus, ImpactResult, ReviewReport, RevisionPair, SymbolRef
+from app.schemas import (
+    Analysis,
+    Decision,
+    LanguageSupport,
+    DecisionStatus,
+    ImpactResult,
+    ReviewReport,
+    RevisionPair,
+    SymbolRef,
+)
 from app.snapshot import SnapshotError, open_pair
 
 
-def _limits(impact: ImpactResult, executed: bool, unprobed: list[SymbolRef]) -> list[str]:
+def _analysis(config: BehaviorConfig) -> Analysis:
+    supports = [
+        LanguageSupport(language=spec.language, adapter=spec.kind, tier=spec.tier)
+        for spec in (get_adapter(language).spec for language in config.languages)
+    ]
+    return Analysis(**supports[0].model_dump(), config_source=config.source, languages=supports)
+
+
+def _limits(impact: ImpactResult, analysis: Analysis, executed: bool, unprobed: list[SymbolRef]) -> list[str]:
     limits = [
         f"Callers traced up to {impact.max_hops} hops; deeper callers are not shown.",
         "Impact is static parser analysis: calls through variables, dynamic dispatch or class hierarchies may be missed. "
         "Unresolved references that could reach a changed symbol are listed as unknowns, not as safe.",
+    ]
+    limits += [
+        f"Language '{support.language}' is supported at tier '{support.tier}': {TIER_LIMITS[support.tier]}. "
+        "Treat missing paths as unknown."
+        for support in analysis.languages
+        if support.tier in TIER_LIMITS
     ]
     if executed:
         limits.append(
@@ -63,7 +87,7 @@ def pipeline(repo: str | Path, base: str, head: str, max_hops: int | None = None
     delta and now reports no delta to that earlier delta, via `Comparison.reruns`.
     """
     with open_pair(repo, base, head) as pair:
-        config = load_config(pair.root)
+        config, config_notes = load_revision_config(pair.base_path, pair.head_path)
         effective_hops = config.max_hops if max_hops is None else max_hops
         impact = analyze(pair, effective_hops, config)
         prior = _prior_decisions(pair, impact)
@@ -71,15 +95,17 @@ def pipeline(repo: str | Path, base: str, head: str, max_hops: int | None = None
             compare(pair, impact=impact, config=config, prior_report=prior_report)
             if run else ([], [], [], [])
         )
+    analysis = _analysis(config)
     return ReviewReport(
         repo=pair.repo,
         revisions=pair.revisions,
+        analysis=analysis,
         impact=impact,
         tests=suites,
         comparisons=comparisons,
         needs_bob_action=missing,
         prior_decisions=prior,
-        limits=_limits(impact, bool(suites or comparisons), missing) + notes,
+        limits=_limits(impact, analysis, bool(suites or comparisons), missing) + config_notes + notes,
     )
 
 
@@ -102,6 +128,10 @@ def _summary(report: ReviewReport) -> str:
         f"{len(impact.changed_symbols)} changed symbols, {len(impact.paths)} impact paths, "
         f"{len(outside)} non-test callers outside the diff, {len(impact.unknowns)} unknowns"
     ]
+    analysis = report.analysis
+    if analysis and any(support.tier != "full" for support in analysis.languages):
+        tiers = ", ".join(f"{support.language} ({support.tier})" for support in analysis.languages)
+        lines.append(f"  analyzed as {tiers} — see limits")
     lines += [f"  outside diff: {p.render()}  ({p.hops[0].path}:{p.hops[0].line})" for p in outside]
     for suite in report.tests:
         lines.append(

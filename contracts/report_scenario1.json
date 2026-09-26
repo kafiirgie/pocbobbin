@@ -12,6 +12,19 @@
       "sample_project/pricing/discount.py"
     ]
   },
+  "analysis": {
+    "language": "python",
+    "adapter": "python-ast",
+    "tier": "full",
+    "config_source": "defaults",
+    "languages": [
+      {
+        "language": "python",
+        "adapter": "python-ast",
+        "tier": "full"
+      }
+    ]
+  },
   "impact": {
     "changed_symbols": [
       {

@@ -22,8 +22,8 @@ multilang = ["tree-sitter>=0.26", "tree-sitter-language-pack>=1.20"]
 [project.scripts]
 behavior-review = "app.cli:main"
 
-[tool.setuptools]
-packages = ["app"]
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

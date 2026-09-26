@@ -146,7 +146,7 @@ fn total(value: i32) -> i32 { apply(value) }
 <?php
 class Discount {
     public function apply($value) { return $value; }
-    public function total($value) { return apply($value); }
+    public function total($value) { return $this->apply($value); }
 }
 """, "public function apply($value) { return $value + 1; }"),
     "kotlin": (".kt", """
@@ -285,3 +285,74 @@ def test_group_two_cross_file_imports_resolve(
         [path.render() for path in impact.paths],
         [unknown.model_dump() for unknown in impact.unknowns],
     )
+
+
+@pytest.mark.parametrize(
+    "language, extension, source, old, new",
+    [
+        (
+            "php", ".php",
+            "<?php\nclass Discount {\n    public function apply($value) { return $value; }\n"
+            "    public function total($value) { return apply($value); }\n}\n",
+            "return $value; }", "return $value + 1; }",
+        ),
+        (
+            "typescript", ".ts",
+            "export class Discount {\n  apply(value: number) { return value; }\n"
+            "  total(value: number) { return apply(value); }\n}\n",
+            "return value; }", "return value + 1; }",
+        ),
+    ],
+)
+def test_bare_call_is_not_a_sibling_method_without_implicit_receiver(
+    tmp_path: Path, language: str, extension: str, source: str, old: str, new: str
+):
+    """In PHP and TS a bare `apply()` names a free function, not `$this->apply()`: no edge, only an unknown."""
+    repo = tmp_path / f"bare-{language}"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "base")
+    write_files(repo, {
+        "behavior.json": f'{{"language":"{language}","extensions":["{extension}"],"tests_dir":"tests"}}',
+        f"src/discount{extension}": source,
+    })
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "base")
+    git(repo, "checkout", "-q", "-b", "head")
+    write_files(repo, {f"src/discount{extension}": source.replace(old, new, 1)})
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "head")
+    with open_pair(repo, "base", "head") as pair:
+        impact = analyze(pair)
+    assert "Discount.apply" in [c.symbol for c in impact.changed_symbols]
+    assert not any("total" in path.render().lower() for path in impact.paths)
+    assert any(u.symbol == "Discount.total" and u.expression == "apply" for u in impact.unknowns)
+
+def test_typescript_report_states_language_tier_and_its_limit(tmp_path: Path):
+    report = pipeline(make_typescript_repo(tmp_path), "base", "head")
+
+    typescript = {"language": "typescript", "adapter": "tree-sitter", "tier": "static_probe"}
+    assert report.analysis.model_dump() == {**typescript, "config_source": "behavior.json", "languages": [typescript]}
+    assert any("'typescript' is supported at tier 'static_probe'" in limit for limit in report.limits)
+
+def test_mixed_repository_reports_every_language_and_warns_per_weaker_tier(tmp_path: Path):
+    repo = tmp_path / "mixed"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "base")
+    write_files(repo, {
+        "behavior.json": '{"languages": ["python", "typescript"]}',
+        "pkg/core.py": "def f():\n    return 1\n",
+        "src/discount.ts": "export function applyDiscount(value: number) { return value; }\n",
+    })
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "base")
+    git(repo, "checkout", "-q", "-b", "head")
+    write_files(repo, {"pkg/core.py": "def f():\n    return 2\n"})
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "head")
+
+    report = pipeline(repo, "base", "head")
+
+    assert (report.analysis.language, report.analysis.tier) == ("python", "full")
+    assert [(s.language, s.tier) for s in report.analysis.languages] == [("python", "full"), ("typescript", "static_probe")]
+    warnings = [limit for limit in report.limits if "is supported at tier" in limit]
+    assert len(warnings) == 1 and "'typescript'" in warnings[0]
