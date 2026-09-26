@@ -37,7 +37,7 @@ export async function buildDecision(report: ReviewReport, comparison: Comparison
   };
 }
 
-export function downloadDecision(decision: Decision) {
+function downloadDecision(decision: Decision) {
   const blob = new Blob([`${JSON.stringify(decision, null, 2)}\n`], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -45,4 +45,12 @@ export function downloadDecision(decision: Decision) {
   link.download = `${decision.id}.json`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url));
+}
+
+/** Browsers drop some of several downloads started in the same tick, so they are spaced out. */
+export async function downloadDecisions(decisions: Decision[]) {
+  for (const [index, decision] of decisions.entries()) {
+    if (index) await new Promise((resolve) => setTimeout(resolve, 250));
+    downloadDecision(decision);
+  }
 }

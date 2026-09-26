@@ -9,7 +9,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { TONE_CLASSES } from "@/components/StatusBadge";
-import { buildDecision, downloadDecision, MIN_RATIONALE } from "@/lib/decision-file";
+import { buildDecision, downloadDecisions, MIN_RATIONALE } from "@/lib/decision-file";
 import { formatValue } from "@/lib/evidence";
 import type { Comparison, Decision, Intent, ReviewReport } from "@/lib/review-report";
 
@@ -19,7 +19,40 @@ const INTENTS: { value: Intent; label: string; hint: string }[] = [
   { value: "unresolved", label: "Unresolved", hint: "Not sure yet: it stays open for review." },
 ];
 
-type SaveState = { status: "saved"; decision: Decision } | { status: "error"; message: string } | null;
+interface Draft {
+  intent: Intent | "";
+  rationale: string;
+}
+
+const EMPTY_DRAFT: Draft = { intent: "", rationale: "" };
+
+/** The disposition to record, or null while the form is incomplete (validate_and_save's rationale rule). */
+function readyIntent(draft: Draft): Intent | null {
+  if (!draft.intent) return null;
+  return draft.intent === "intended" && draft.rationale.trim().length < MIN_RATIONALE ? null : draft.intent;
+}
+
+interface ReadyDecision {
+  comparison: Comparison;
+  intent: Intent;
+  rationale: string;
+}
+
+type SaveState = { status: "saved"; decisions: Decision[] } | { status: "error"; message: string } | null;
+
+function useDecisionDownload(report: ReviewReport) {
+  const [save, setSave] = useState<SaveState>(null);
+  const download = async (items: ReadyDecision[]) => {
+    try {
+      const decisions = await Promise.all(items.map((item) => buildDecision(report, item.comparison, item.intent, item.rationale)));
+      await downloadDecisions(decisions);
+      setSave({ status: "saved", decisions });
+    } catch (error: unknown) {
+      setSave({ status: "error", message: error instanceof Error ? error.message : "The decision file could not be built." });
+    }
+  };
+  return { save, download, clear: () => setSave(null) };
+}
 
 function SaveStatus({ state }: { state: SaveState }) {
   if (!state) return null;
@@ -30,11 +63,14 @@ function SaveStatus({ state }: { state: SaveState }) {
       </p>
     );
   }
-  const { id, supersedes } = state.decision;
+  const [only] = state.decisions;
+  const many = state.decisions.length > 1;
   return (
     <p role="status" className="max-w-prose text-sm text-muted-foreground">
-      Downloaded <code>{id}.json</code> as a proposed decision{supersedes ? <> that supersedes <code>{supersedes}</code></> : null}.
-      Commit it to <code>behavior_decisions/</code> on this PR's branch; it counts as approved once the PR is merged.
+      Downloaded {state.decisions.map((d, i) => <span key={d.id}>{i ? ", " : ""}<code>{d.id}.json</code></span>)} as{" "}
+      {many ? "proposed decisions" : "a proposed decision"}
+      {!many && only.supersedes ? <> that supersedes <code>{only.supersedes}</code></> : null}. Commit {many ? "them" : "it"} to{" "}
+      <code>behavior_decisions/</code> on this PR's branch; {many ? "they count" : "it counts"} as approved once the PR is merged.
     </p>
   );
 }
@@ -55,30 +91,31 @@ function IntentChoice({ id, intent, onChange }: { id: string; intent: Intent | "
   );
 }
 
-function DeltaDecision({ report, comparison }: { report: ReviewReport; comparison: Comparison }) {
-  const [intent, setIntent] = useState<Intent | "">("");
-  const [rationale, setRationale] = useState("");
-  const [save, setSave] = useState<SaveState>(null);
+interface DraftState {
+  value: Draft;
+  set: (next: Draft) => void;
+}
+
+function DeltaDecision({ report, comparison, draft }: { report: ReviewReport; comparison: Comparison; draft: DraftState }) {
+  const { save, download, clear } = useDecisionDownload(report);
   const id = comparison.probe.id;
-  const shortRationale = intent === "intended" && rationale.trim().length < MIN_RATIONALE;
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
+  const { intent, rationale } = draft.value;
+  const ready = readyIntent(draft.value);
+  const update = (next: Partial<Draft>) => {
+    draft.set({ ...draft.value, ...next });
+    clear();
+  };
+  const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!intent || shortRationale) return;
-    try {
-      const decision = await buildDecision(report, comparison, intent, rationale);
-      downloadDecision(decision);
-      setSave({ status: "saved", decision });
-    } catch (error: unknown) {
-      setSave({ status: "error", message: error instanceof Error ? error.message : "The decision file could not be built." });
-    }
+    if (ready) void download([{ comparison, intent: ready, rationale }]);
   };
   return (
-    <form className="space-y-3" onSubmit={(event) => void submit(event)}>
+    <form className="space-y-3" onSubmit={submit}>
       <p className="text-sm">
         <code className="font-semibold">{comparison.probe.target.symbol}</code> via probe <code>{id}</code>:{" "}
         <code>{formatValue(comparison.base.output)}</code> → <code>{formatValue(comparison.head.output)}</code>
       </p>
-      <IntentChoice id={id} intent={intent} onChange={(next) => { setIntent(next); setSave(null); }} />
+      <IntentChoice id={id} intent={intent} onChange={(next) => update({ intent: next })} />
       <div className="space-y-1">
         <Label htmlFor={`${id}-rationale`}>
           Rationale {intent === "intended" ? `(required, at least ${MIN_RATIONALE} characters)` : "(optional)"}
@@ -86,17 +123,29 @@ function DeltaDecision({ report, comparison }: { report: ReviewReport; compariso
         <Textarea
           id={`${id}-rationale`}
           value={rationale}
-          onChange={(event) => { setRationale(event.target.value); setSave(null); }}
-          aria-invalid={shortRationale}
+          onChange={(event) => update({ rationale: event.target.value })}
+          aria-invalid={intent === "intended" && !ready}
           placeholder="Why is this behavior change correct?"
         />
       </div>
-      <Button type="submit" disabled={!intent || shortRationale || report.fixture}>
+      <Button type="submit" disabled={!ready || report.fixture}>
         <Download aria-hidden="true" />Download decision
       </Button>
-      {report.fixture ? <p className="text-sm text-muted-foreground">A fixture report cannot produce a ledger record.</p> : null}
       <SaveStatus state={save} />
     </form>
+  );
+}
+
+function DownloadAll({ report, ready, total }: { report: ReviewReport; ready: ReadyDecision[]; total: number }) {
+  const { save, download } = useDecisionDownload(report);
+  return (
+    <div className="space-y-2">
+      <Button variant="outline" disabled={!ready.length || report.fixture} onClick={() => void download(ready)}>
+        <Download aria-hidden="true" />Download all ready decisions ({ready.length} of {total})
+      </Button>
+      <p className="text-xs text-muted-foreground">One file per decision; your browser may ask to allow several downloads.</p>
+      <SaveStatus state={save} />
+    </div>
   );
 }
 
@@ -113,6 +162,32 @@ function PriorDecision({ decision }: { decision: Decision }) {
         {decision.target.path} · decision <code>{decision.id}</code>{decision.requirement_ref ? ` · ${decision.requirement_ref}` : ""}
       </p>
     </li>
+  );
+}
+
+function PendingDecisions({ report, deltas }: { report: ReviewReport; deltas: Comparison[] }) {
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  const draftOf = (comparison: Comparison) => drafts[comparison.probe.id] ?? EMPTY_DRAFT;
+  const ready = deltas.flatMap((comparison) => {
+    const intent = readyIntent(draftOf(comparison));
+    return intent ? [{ comparison, intent, rationale: draftOf(comparison).rationale }] : [];
+  });
+  if (!deltas.length) return <p className="text-sm text-muted-foreground">No behavior difference in this report needs a decision.</p>;
+  return (
+    <>
+      {report.fixture ? <p className="text-sm text-muted-foreground">A fixture report cannot produce ledger records.</p> : null}
+      {deltas.length > 1 ? <DownloadAll report={report} ready={ready} total={deltas.length} /> : null}
+      {deltas.map((comparison) => (
+        <div key={comparison.probe.id} className="space-y-6">
+          <Separator />
+          <DeltaDecision
+            report={report}
+            comparison={comparison}
+            draft={{ value: draftOf(comparison), set: (next) => setDrafts((all) => ({ ...all, [comparison.probe.id]: next })) }}
+          />
+        </div>
+      ))}
+    </>
   );
 }
 
@@ -133,16 +208,7 @@ export function DecisionPanel({ report }: { report: ReviewReport }) {
             proposed there, and counts as approved once that PR is merged.
           </AlertDescription>
         </Alert>
-        {deltas.length ? (
-          deltas.map((comparison, index) => (
-            <div key={comparison.probe.id} className="space-y-6">
-              {index ? <Separator /> : null}
-              <DeltaDecision report={report} comparison={comparison} />
-            </div>
-          ))
-        ) : (
-          <p className="text-sm text-muted-foreground">No behavior difference in this report needs a decision.</p>
-        )}
+        <PendingDecisions report={report} deltas={deltas} />
         <Separator />
         <section aria-labelledby="prior-heading" className="space-y-3">
           <h3 id="prior-heading" className="font-medium">Prior decisions from the ledger</h3>
