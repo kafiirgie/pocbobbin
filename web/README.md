@@ -6,7 +6,9 @@ in two tabs:
 
 - **PR review:** summary with language/tier and verdict counts, the evidence map (callers → changed
   code, nested by folder and file, colored by what execution showed), behavior differences, items
-  that need attention, a session-only decision form with prior ledger decisions, tests and limits.
+  that need attention, a decision form with prior ledger decisions, tests and limits. **Download
+  decision** writes the same `behavior_decisions/<id>.json` record as `app.decisions.validate_and_save`
+  (status `proposed`); commit it on the PR's branch, and it counts as approved once that PR is merged.
 - **Repo map:** every file grouped by folder with its imports and last commit/PR; it opens on the
   files the PR changed.
 
