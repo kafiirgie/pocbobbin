@@ -151,18 +151,24 @@ pytest -q
 
 ### Optional multi-language analysis
 
-Python remains the default and requires no configuration file. A repository can opt into the
-Tree-sitter adapters with the optional dependencies:
+The CLI auto-detects supported languages from repository manifests and source extensions. A
+missing `behavior.json` selects one or more static adapters; a mixed repository is analyzed by
+each detected adapter and the evidence is merged. Python remains the fallback only when no
+language evidence is detectable. Explicit `behavior.json` always wins and is recommended when a
+repository has a custom test/probe toolchain.
+
+Tree-sitter is installed with the package because automatic detection may select a non-Python
+adapter. For development, install the test tools as well:
 
 ```bash
-pip install -e ".[dev,multilang]"
+pip install -e ".[dev]"
 ```
 
 The adapter registry currently accepts Python, TypeScript, JavaScript, Java, C#, Go, C++, C,
 Rust, PHP, Kotlin, Ruby, Swift, Dart, and Bash. Full support for a language still requires a
-real repository/toolchain fixture and process-output verification in CI.
-Add `behavior.json` at the repository root to select one language and its real test/probe
-commands. Commands are argument arrays, not shell strings:
+real repository/toolchain fixture and process-output verification in CI. Add `behavior.json` at
+the repository root when you need to override detection, select a primary test profile, or
+provide real test/probe commands. Commands are argument arrays, not shell strings:
 
 ```json
 {
@@ -174,6 +180,17 @@ commands. Commands are argument arrays, not shell strings:
   "probe_runner": ["npx", "tsx", "tools/run_probe.ts"],
   "test_file_patterns": ["*.test.ts", "*.spec.ts"],
   "max_hops": 2
+}
+```
+
+For a mixed repository, use `languages` instead of `language`; the first entry is the primary
+runtime/test profile and all entries participate in static impact analysis:
+
+```json
+{
+  "languages": ["typescript", "python"],
+  "test_command": ["npm", "test", "--", "--reporter=json"],
+  "test_report": "vitest-json"
 }
 ```
 

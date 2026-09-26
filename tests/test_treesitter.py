@@ -74,6 +74,42 @@ def test_cli_pipeline_uses_repository_language_config(tmp_path: Path):
     assert report.impact.paths[0].render() == "priceTotal → applyDiscount"
 
 
+def test_auto_detected_mixed_adapters_merge_static_evidence(tmp_path: Path):
+    repo = tmp_path / "mixed"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "base")
+    write_files(
+        repo,
+        {
+            "package.json": "{}",
+            "tsconfig.json": "{}",
+            "src/discount.ts": "export function apply(value: number) { return value; }\nexport function total(value: number) { return apply(value); }\n",
+            "src/discount.py": "def apply(value):\n    return value\n\ndef total(value):\n    return apply(value)\n",
+            "src/invoice.ts": "import { apply } from \"./discount\";\nexport function invoice(value: number) { return apply(value); }\n",
+            "src/invoice.py": "from .discount import apply\n\ndef invoice(value):\n    return apply(value)\n",
+        },
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "base")
+    git(repo, "checkout", "-q", "-b", "head")
+    write_files(
+        repo,
+        {
+            "src/discount.ts": "export function apply(value: number) { return value + 1; }\nexport function total(value: number) { return apply(value); }\n",
+            "src/discount.py": "def apply(value):\n    return value + 1\n\ndef total(value):\n    return apply(value)\n",
+        },
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "head")
+
+    with open_pair(repo, "base", "head") as pair:
+        impact = analyze(pair)
+
+    changed = {(item.path, item.symbol) for item in impact.changed_symbols}
+    assert changed == {("src/discount.py", "apply"), ("src/discount.ts", "apply")}
+    assert any(path.render().endswith("→ apply") and path.outside_diff for path in impact.paths)
+
+
 LANGUAGE_FIXTURES = {
     "java": (".java", """
 package demo;
