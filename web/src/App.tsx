@@ -5,12 +5,15 @@ import { DecisionPanel } from "@/components/DecisionPanel";
 import { LimitsCard, TestsCard } from "@/components/TestsAndLimits";
 import { NeedsAttention } from "@/components/NeedsAttention";
 import { NodeDetailsSheet } from "@/components/NodeDetailsSheet";
-import { ErrorState, LoadingState } from "@/components/ReportStates";
+import { OpenReportButton } from "@/components/OpenReportButton";
+import { ErrorState, LoadingState, OpenedNotice, OpenError } from "@/components/ReportStates";
 import { SummaryHeader } from "@/components/SummaryHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { evidenceNodes } from "@/lib/evidence";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import type { OpenedReport } from "@/lib/open-report";
+import type { RepoMap } from "@/lib/repo-map";
 import { fetchJson, parseReport, ReportError, type ReviewReport } from "@/lib/review-report";
 import { useTheme } from "@/lib/use-theme";
 
@@ -60,36 +63,59 @@ function PrReview({ report }: { report: ReviewReport }) {
   );
 }
 
-export default function App() {
-  const { theme, toggle } = useTheme();
-  const [reloadToken, setReloadToken] = useState(0);
-  const state = useReport(reloadToken);
+/** `map` undefined loads the shipped repo_map.json; null means none was opened alongside the report. */
+function ReportViews({ report, map }: { report: ReviewReport; map?: RepoMap | null }) {
   const [tab, setTab] = useState("pr");
   const showEvidence = useCallback(() => {
     setTab("pr");
     requestAnimationFrame(() => document.getElementById("map-heading")?.scrollIntoView({ block: "start" }));
   }, []);
+  return (
+    <Tabs value={tab} onValueChange={setTab} className="gap-6">
+      <TabsList aria-label="Views">
+        <TabsTrigger value="pr">PR review</TabsTrigger>
+        <TabsTrigger value="repo">Repo map</TabsTrigger>
+      </TabsList>
+      <TabsContent value="pr"><PrReview report={report} /></TabsContent>
+      <TabsContent value="repo">
+        <Suspense fallback={<Skeleton className="h-128 w-full" />}>
+          <RepoMapTab changedFiles={report.revisions.changed_files} map={map} onShowEvidence={showEvidence} />
+        </Suspense>
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+function ShippedReport() {
+  const [reloadToken, setReloadToken] = useState(0);
+  const state = useReport(reloadToken);
+  if (state.status === "loading") return <LoadingState />;
+  if (state.status === "error") return <ErrorState message={state.message} onRetry={() => setReloadToken((t) => t + 1)} />;
+  return <ReportViews report={state.report} />;
+}
+
+export default function App() {
+  const { theme, toggle } = useTheme();
+  const [opened, setOpened] = useState<OpenedReport | null>(null);
+  const [openError, setOpenError] = useState<string>();
+  const open = useCallback((next: OpenedReport) => {
+    setOpened(next);
+    setOpenError(undefined);
+  }, []);
 
   return (
     <TooltipProvider>
-      <AppHeader theme={theme} onToggleTheme={toggle} />
-      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
-        {state.status === "loading" ? <LoadingState /> : null}
-        {state.status === "error" ? <ErrorState message={state.message} onRetry={() => setReloadToken((t) => t + 1)} /> : null}
-        {state.status === "ready" ? (
-          <Tabs value={tab} onValueChange={setTab} className="gap-6">
-            <TabsList aria-label="Views">
-              <TabsTrigger value="pr">PR review</TabsTrigger>
-              <TabsTrigger value="repo">Repo map</TabsTrigger>
-            </TabsList>
-            <TabsContent value="pr"><PrReview report={state.report} /></TabsContent>
-            <TabsContent value="repo">
-              <Suspense fallback={<Skeleton className="h-128 w-full" />}>
-                <RepoMapTab changedFiles={state.report.revisions.changed_files} onShowEvidence={showEvidence} />
-              </Suspense>
-            </TabsContent>
-          </Tabs>
-        ) : null}
+      <AppHeader theme={theme} onToggleTheme={toggle}>
+        <OpenReportButton onOpen={open} onError={setOpenError} />
+      </AppHeader>
+      <main className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+        {openError ? <OpenError message={openError} onDismiss={() => setOpenError(undefined)} /> : null}
+        {opened ? <OpenedNotice names={opened.names} onClose={() => setOpened(null)} /> : null}
+        {opened ? (
+          <ReportViews key={`${opened.names.join()}:${opened.report.generated_at}`} report={opened.report} map={opened.map} />
+        ) : (
+          <ShippedReport />
+        )}
       </main>
     </TooltipProvider>
   );

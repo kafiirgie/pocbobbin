@@ -19,6 +19,8 @@ import { cn } from "@/lib/utils";
 
 interface RepoMapTabProps {
   changedFiles: string[];
+  /** Undefined loads /data/repo_map.json; null means the opened report came without one. */
+  map?: RepoMap | null;
   onShowEvidence: () => void;
 }
 
@@ -118,9 +120,10 @@ function Canvas({ map, changedFiles, onShowEvidence }: { map: RepoMap } & RepoMa
   );
 }
 
-function useRepoMap(): LoadState {
+function useRepoMap(given: RepoMap | null | undefined): LoadState {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   useEffect(() => {
+    if (given !== undefined) return;
     const controller = new AbortController();
     fetchJson("/data/repo_map.json", controller.signal)
       .then((json) => setState(json === null ? { status: "missing" } : { status: "ready", map: parseRepoMap(json) }))
@@ -129,12 +132,13 @@ function useRepoMap(): LoadState {
         setState({ status: "error", message: error instanceof Error ? error.message : "The repo map could not be loaded." });
       });
     return () => controller.abort();
-  }, []);
-  return state;
+  }, [given]);
+  if (given === null) return { status: "missing" };
+  return given ? { status: "ready", map: given } : state;
 }
 
-export default function RepoMapTab({ changedFiles, onShowEvidence }: RepoMapTabProps) {
-  const state = useRepoMap();
+export default function RepoMapTab({ changedFiles, map: given, onShowEvidence }: RepoMapTabProps) {
+  const state = useRepoMap(given);
   if (state.status === "loading") return <Skeleton className="h-128 w-full" />;
   if (state.status === "error") {
     return (
@@ -152,7 +156,8 @@ export default function RepoMapTab({ changedFiles, onShowEvidence }: RepoMapTabP
           <EmptyMedia variant="icon"><FileQuestion aria-hidden="true" /></EmptyMedia>
           <EmptyTitle>No repo map yet</EmptyTitle>
           <EmptyDescription>
-            Generate one with <code>behavior-review map --ref HEAD --out web/public/data/repo_map.json</code>, then reload.
+            Generate one with <code>behavior-review map --ref HEAD --out repo_map.json</code> on the report's head commit, then
+            pick it together with report.json in Open report… (or put it in <code>web/public/data/</code> and reload).
           </EmptyDescription>
         </EmptyHeader>
       </Empty>

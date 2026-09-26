@@ -28,8 +28,16 @@ npm run preview
 To refresh both files from a newer Action run:
 `gh run download <run-id> --repo webdev-testa/pocbobbin --name behavior-review-report --dir public/data`
 
-To view another repository, put its `report.json` (from `behavior-review --run --json`) and
-`repo_map.json` (from `behavior-review map`) in `public/data/` and rebuild.
+To view another repository, generate its files and pick them with **Open report…** in the header:
+
+```bash
+behavior-review --base main --head HEAD --json report.json   # add --run to execute tests and probes
+behavior-review map --ref HEAD --out repo_map.json            # optional; must be the report's head commit
+```
+
+The files are read in the browser and never uploaded; reloading returns to the shipped report. To
+make them the default instead, put them in `public/data/` and rebuild (`npm test` then applies to
+them too).
 
 Libraries and licenses: `THIRD_PARTY.md`.
 

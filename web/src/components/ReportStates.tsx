@@ -1,7 +1,8 @@
-import { CircleAlert, RotateCw } from "lucide-react";
+import { CircleAlert, FolderOpen, RotateCw, Undo2 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { TONE_CLASSES } from "@/components/StatusBadge";
 
 export function LoadingState() {
   return (
@@ -10,6 +11,35 @@ export function LoadingState() {
       <Skeleton className="h-80 w-full" />
       <Skeleton className="h-48 w-full" />
     </div>
+  );
+}
+
+export function OpenedNotice({ names, onClose }: { names: string[]; onClose: () => void }) {
+  return (
+    <Alert className={TONE_CLASSES.info}>
+      <FolderOpen aria-hidden="true" />
+      <AlertTitle>Showing {names.join(" and ")} from your computer</AlertTitle>
+      <AlertDescription className="space-y-3">
+        <p>The files were read in this browser and not uploaded. Reloading the page returns to the shipped report.</p>
+        <Button variant="outline" size="sm" onClick={onClose}>
+          <Undo2 aria-hidden="true" />
+          Back to the shipped report
+        </Button>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+export function OpenError({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  return (
+    <Alert variant="destructive">
+      <CircleAlert aria-hidden="true" />
+      <AlertTitle>Those files could not be opened</AlertTitle>
+      <AlertDescription className="space-y-3">
+        <p>{message} The page still shows the previous report.</p>
+        <Button variant="outline" size="sm" onClick={onDismiss}>Dismiss</Button>
+      </AlertDescription>
+    </Alert>
   );
 }
 
