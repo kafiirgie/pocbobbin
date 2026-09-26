@@ -3,19 +3,18 @@
 Owner: Wipiii (B). Working branch: `feat/execution-engine` (`efa88f4`), based on `origin/main` (`c0d9885`) with A's engine merged.
 Repo: `~/projects/pocbobbin` on wipiii-server. Every number below is real command output, no fixtures.
 
-## Open PR
+## Merged (PR #3)
 
-Pushed and verified:
+Pushed and verified with an SSH remote authenticated to the repo, e.g.:
 
 ```bash
-cd ~/projects/pocbobbin
-export GIT_SSH_COMMAND='ssh -i /home/wipiii/.ssh/id_ed25519 -o IdentitiesOnly=yes'
 git push git@github.com:webdev-testa/pocbobbin.git feat/execution-engine:feat/execution-engine
 git push git@github.com:webdev-testa/pocbobbin.git base:base scenario1-head:scenario1-head scenario3-head:scenario3-head scenario4-head:scenario4-head
 ```
 
 Branch `feat/execution-engine` at `7240d4d`; scenario branches `base` `60d933a2`,
 `scenario1-head` `7b686d8c`, `scenario3-head` `f5054caf`, `scenario4-head` `f7a09999`.
+See `handoffs/scenario-refs.json` for the current SHAs.
 
 **The scenario branches must be public**, otherwise the PR is not runnable: the tests and
 the CLI resolve them as `origin/base`, `origin/scenario1-head` and so on. Verified on a fresh
