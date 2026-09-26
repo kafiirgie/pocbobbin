@@ -1,45 +1,30 @@
-import { Button } from "./ui/button";
+import { CircleAlert, RotateCw } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export function LoadingState() {
   return (
-    <main id="main-content" tabIndex={-1} aria-busy="true" aria-live="polite" className="mx-auto max-w-[1440px] px-5 py-8 sm:px-8 lg:px-12 lg:py-12">
-      <div className="space-y-8 motion-safe:animate-pulse">
-        <div className="h-4 w-32 rounded-[2px] bg-rule" />
-        <div className="h-14 max-w-2xl rounded-[2px] bg-rule" />
-        <div className="h-5 max-w-xl rounded-[2px] bg-rule" />
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, index) => <div key={index} className="h-32 border border-rule bg-surface" />)}
-        </div>
-        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
-          <div className="h-[430px] border border-rule bg-surface" />
-          <div className="h-[430px] border border-rule bg-surface" />
-        </div>
-      </div>
-      <span className="sr-only">Loading report evidence</span>
-    </main>
+    <div role="status" aria-label="Loading the report" className="space-y-4">
+      <Skeleton className="h-40 w-full" />
+      <Skeleton className="h-80 w-full" />
+      <Skeleton className="h-48 w-full" />
+    </div>
   );
 }
 
-interface ReportStateProps {
-  title: string;
-  description: string;
-  actionLabel: string;
-  onAction: () => void;
-  tone?: "neutral" | "danger";
-}
-
-export function ReportState({ title, description, actionLabel, onAction, tone = "neutral" }: ReportStateProps) {
+export function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <main id="main-content" tabIndex={-1} className="mx-auto flex min-h-[65vh] max-w-[760px] items-center px-5 py-12 sm:px-8">
-      <section role={tone === "danger" ? "alert" : undefined} className="w-full border border-rule bg-surface p-6 sm:p-10">
-        <div className={`mb-5 size-3 ${tone === "danger" ? "bg-danger" : "bg-accent"}`} aria-hidden="true" />
-        <p className="mono-value text-[10px] font-semibold uppercase tracking-[0.18em] text-faint">Report state</p>
-        <h1 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-ink">{title}</h1>
-        <p className="mt-3 max-w-xl text-sm leading-7 text-subtle">{description}</p>
-        <Button className="mt-6" variant={tone === "danger" ? "secondary" : "primary"} onClick={onAction}>
-          {actionLabel}
+    <Alert variant="destructive">
+      <CircleAlert aria-hidden="true" />
+      <AlertTitle>The evidence report could not be shown</AlertTitle>
+      <AlertDescription className="space-y-3">
+        <p>{message} No claims are shown until a valid report loads.</p>
+        <Button variant="outline" size="sm" onClick={onRetry}>
+          <RotateCw aria-hidden="true" />
+          Retry
         </Button>
-      </section>
-    </main>
+      </AlertDescription>
+    </Alert>
   );
 }
