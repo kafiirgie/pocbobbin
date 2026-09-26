@@ -38,12 +38,14 @@ jobs:
               --base "origin/${{ github.base_ref }}" \
               --head HEAD \
               --run \
+              --link "action_run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
               --json report.json
           else
             python -m app.cli \
               --base "origin/${{ github.base_ref }}" \
               --head HEAD \
               --run \
+              --link "action_run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
               --json report.json
           fi
 
